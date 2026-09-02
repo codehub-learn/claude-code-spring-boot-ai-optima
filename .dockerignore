@@ -1,0 +1,14 @@
+.*
+*.iml
+*.iws
+**/target/
+**/cdk.out/
+.sonar/
+.sonarlint/
+.dockerignore
+.gitignore
+.git
+**/*.log
+docker-compose-*
+dockerfile-*
+docker/
