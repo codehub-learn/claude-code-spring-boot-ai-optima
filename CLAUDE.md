@@ -12,7 +12,7 @@ A reference application that showcases the current Spring ecosystem for building
 - **RDBMS**: PostgreSQL is the default (with `pgvector` as the Spring AI vector store). Oracle is a supported alternative; keep persistence
   code portable and push vendor specifics into config or migration scripts.
 - **REST APIs** as the primary interface, documented with OpenAPI.
-- **Maven** build, **Java 25** (LTS) toolchain.
+- **Maven** multi-module reactor (`gr.codelearn.<product>` groupId), **Java 25** (LTS) toolchain. See *Maven multi-module layout*.
 
 The secondary goal is to use Claude Code to scaffold and evolve the codebase, so structure and conventions below are written to be
 machine-followable.
@@ -35,6 +35,29 @@ Local infrastructure (Postgres + pgvector, the `grafana/otel-lgtm` telemetry sta
 Testcontainers, so they need a running Docker daemon but no manual setup.
 
 Never mark a task done until `./mvnw verify` and `spotless:check` pass.
+
+## Maven multi-module layout
+
+This repo is a Maven reactor that co-hosts multiple codebases (products) under one Git repo. Modules may depend on each other; the driver is
+co-hosting. Three pom shapes exist: **parent** (`packaging = pom`, repo root), **aggregator** (`packaging = pom`, groups sibling modules),
+and **code module** (`packaging = jar`; `spring-boot-maven-plugin` only on runnable application modules, library modules omit `<build>`).
+
+Rules that apply to every pom:
+
+- Tabs for indentation, CRLF, UTF-8, no final newline (`.editorconfig`); Spotless enforces.
+- `<project>` attribute order: `xmlns:xsi`, then `xmlns`, then `xsi:schemaLocation`.
+- Keep the `<!-- ... -->` banner comments and the single blank line between sections exactly as the skeletons show.
+- `<name>` is always `[${project.artifactId}]`.
+- Reactor `groupId` is `gr.codelearn.<product>`; child modules inherit `groupId` and `version` and declare neither.
+- `<organization>` is always `Code.Learn by Code.Hub` / `https://www.codehub.gr/codelearn/`; SCM and distribution URLs sit under
+  `github.com/codehub-learn/<repo>`.
+- Skeletons are **structure only**. Never copy libraries or versions from them; pick dependencies and versions from the tech-stack table
+  below and give each a short `<!-- ... -->` comment, grouping related entries with a blank line between groups.
+- Native Boot structured logging is the choice (see *Observability*): do **not** exclude `spring-boot-starter-logging`, do **not** add
+  Log4j2 / Disruptor, do **not** add a log4j version-ban enforcer rule.
+
+When asked to "create the parent pom", "add an aggregator / module group", or "add a module / product / app", invoke the **`maven-scaffold`
+skill** for the full skeletons and per-shape section order.
 
 ## Tech stack and library choices
 
