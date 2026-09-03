@@ -209,10 +209,10 @@ Micrometer is still the internal facade; OTLP is the wire protocol; the Grafana 
 
 - This is a greenfield repo. The first real task is scaffolding: `pom.xml`, the application class, base config, Docker Compose, and one
   vertical-slice feature that exercises DB + REST + Spring AI.
-- Before generating multi-file structure, write the plan to `tasks/todo.md` and confirm it (per the global workflow rules).
+- Before generating multi-file structure, write the plan to `.claude/tasks` and confirm it (per the global workflow rules).
 - When adding a feature, generate the full vertical slice (controller, service, repository, entity, DTO records, MapStruct mapper, Flyway
   migration, tests) in one pass, following the structure above.
-- After any correction from the user, record the pattern in `tasks/lessons.md`.
+- After any correction from the user, record the pattern in `.claude/tasks`.
 - Prefer editing existing files over adding parallel variants. Keep changes minimal and scoped.
 - Use the IntelliJ MCP (`idea` server) for build, inspection, and refactoring feedback when available.
 
