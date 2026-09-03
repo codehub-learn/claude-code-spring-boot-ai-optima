@@ -12,7 +12,7 @@ A reference application that showcases the current Spring ecosystem for building
 - **RDBMS**: PostgreSQL is the default (with `pgvector` as the Spring AI vector store). Oracle is a supported alternative; keep persistence
   code portable and push vendor specifics into config or migration scripts.
 - **REST APIs** as the primary interface, documented with OpenAPI.
-- **Maven** multi-module reactor (`gr.codelearn.<product>` groupId), **Java 25** (LTS) toolchain. See *Maven multi-module layout*.
+- **Maven** multi-module reactor (flat `gr.codelearn` groupId), **Java 25** (LTS) toolchain. See *Maven multi-module layout*.
 
 The secondary goal is to use Claude Code to scaffold and evolve the codebase, so structure and conventions below are written to be
 machine-followable.
@@ -48,7 +48,8 @@ Rules that apply to every pom:
 - `<project>` attribute order: `xmlns:xsi`, then `xmlns`, then `xsi:schemaLocation`.
 - Keep the `<!-- ... -->` banner comments and the single blank line between sections exactly as the skeletons show.
 - `<name>` is always `[${project.artifactId}]`.
-- Reactor `groupId` is `gr.codelearn.<product>`; child modules inherit `groupId` and `version` and declare neither.
+- Reactor `groupId` is always the flat `gr.codelearn` (never `gr.codelearn.<product>`); the product name lives in the `artifactId` and the
+  Java package. Child modules inherit `groupId` and `version` and declare neither.
 - `<organization>` is always `Code.Learn by Code.Hub` / `https://www.codehub.gr/codelearn/`; SCM and distribution URLs sit under
   `github.com/codehub-learn/<repo>`.
 - Skeletons are **structure only**. Never copy libraries or versions from them; pick dependencies and versions from the tech-stack table
@@ -99,10 +100,11 @@ Records are the default for any immutable data carrier. Reach for Lombok only wh
 
 ## Package structure
 
-Package by feature first, layer second. Root package: `gr.codelearn.<app>`.
+Package by feature first, layer second. Root package: `gr.codelearn.<product>.<app>` (the `groupId` stays the flat `gr.codelearn`; the
+product segment appears only in the Java package).
 
 ```
-gr.codelearn.<app>
+gr.codelearn.<product>.<app>
 ├── <app>Application.java
 ├── config/                 # cross-cutting @Configuration, not feature-specific
 │   ├── ai/                 # ChatClient, advisors, vector store wiring

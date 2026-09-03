@@ -2,7 +2,7 @@
 name: maven-scaffold
 description: |
 	Use when creating or modifying Maven pom files in this reactor: "create the parent pom", "add an aggregator / module group", "add a module / product / app", or any pom skeleton / section-order question. Provides the three pom shapes (parent, aggregator, code module), their exact section order, and the rules every pom must follow.
-version: 1.0.0
+version: 1.1.0
 author: Constantinos Giannacoulis
 ---
 
@@ -16,7 +16,8 @@ app", generate the matching skeleton below.
 - `<project>` attribute order: `xmlns:xsi`, then `xmlns`, then `xsi:schemaLocation`.
 - Keep the `<!-- ... -->` banner comments and the single blank line between sections exactly as the skeletons show.
 - `<name>` is always `[${project.artifactId}]`.
-- Reactor `groupId` is `gr.codelearn.<product>`; child modules inherit `groupId` and `version` and declare neither.
+- Reactor `groupId` is always the flat `gr.codelearn` (never `gr.codelearn.<product>`); the product name lives in the `artifactId` and the
+  Java package, not the `groupId`. Child modules inherit `groupId` and `version` and declare neither.
 - `<organization>` is always `Code.Learn by Code.Hub` / `https://www.codehub.gr/codelearn/`; SCM and distribution URLs sit under
   `github.com/codehub-learn/<repo>`.
 - The skeletons define **structure only**. Never copy libraries or versions out of them or out of any template; pick dependencies and
@@ -44,9 +45,7 @@ then
 	<packaging>pom</packaging>
 
 	<!-- Versioning -->
-	<groupId>gr.codelearn.
-		<product>
-	</groupId>
+	<groupId>gr.codelearn</groupId>
 	<artifactId>...</artifactId>
 	<version>...</version>
 

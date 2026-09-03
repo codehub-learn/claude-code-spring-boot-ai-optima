@@ -7,7 +7,7 @@
 	<packaging>pom</packaging>
 
 	<!-- Versioning -->
-	<groupId>gr.codelearn.springbootai</groupId>
+	<groupId>gr.codelearn</groupId>
 	<artifactId>spring-boot-ai</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 
@@ -28,7 +28,7 @@
 	<inceptionYear>2026</inceptionYear>
 
 	<modules>
-		<!-- aggregators and code modules are added here as products land -->
+		<module>spring-boot-training</module>
 	</modules>
 
 	<!-- Properties/Variables -->
@@ -52,6 +52,11 @@
 		<!-- Maven plugins (versions not managed by Spring Boot) -->
 		<jacoco-maven-plugin.version>0.8.13</jacoco-maven-plugin.version>
 		<spotless-maven-plugin.version>2.44.5</spotless-maven-plugin.version>
+
+		<!-- Base args for the test JVM. jacoco's prepare-agent appends its -javaagent to this
+		     property; surefire then consumes it via @{argLine}. -Xshare:off silences the CDS
+		     "Sharing is only supported..." warning that any -javaagent (jacoco, Mockito) triggers -->
+		<argLine>-Xshare:off</argLine>
 	</properties>
 
 	<!-- Dependency Management -->
@@ -180,6 +185,31 @@
 						</execution>
 					</executions>
 				</plugin>
+
+				<!-- maven-dependency-plugin: publish each resolved dependency jar path as a
+				     ${groupId:artifactId:type} property, so Mockito can be passed as a -javaagent -->
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-dependency-plugin</artifactId>
+					<executions>
+						<execution>
+							<id>resolve-dependency-paths</id>
+							<goals>
+								<goal>properties</goal>
+							</goals>
+						</execution>
+					</executions>
+				</plugin>
+
+				<!-- maven-surefire-plugin: run Mockito as a Java agent (removes the self-attach and
+				     dynamic-agent-loading warnings on JDK 25); @{argLine} keeps jacoco's agent -->
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-surefire-plugin</artifactId>
+					<configuration>
+						<argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar}</argLine>
+					</configuration>
+				</plugin>
 			</plugins>
 		</pluginManagement>
 
@@ -200,6 +230,14 @@
 			<plugin>
 				<groupId>org.jacoco</groupId>
 				<artifactId>jacoco-maven-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
 			</plugin>
 		</plugins>
 
