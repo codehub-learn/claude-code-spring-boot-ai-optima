@@ -99,10 +99,10 @@ Records are the default for any immutable data carrier. Reach for Lombok only wh
 
 ## Package structure
 
-Package by feature first, layer second. Root package: `com.giannacoulis.<app>`.
+Package by feature first, layer second. Root package: `gr.codelearn.<app>`.
 
 ```
-com.giannacoulis.<app>
+gr.codelearn.<app>
 ├── <app>Application.java
 ├── config/                 # cross-cutting @Configuration, not feature-specific
 │   ├── ai/                 # ChatClient, advisors, vector store wiring
