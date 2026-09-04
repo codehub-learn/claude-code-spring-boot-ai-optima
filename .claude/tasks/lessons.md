@@ -39,12 +39,18 @@ Patterns captured after user corrections. Review at session start.
 
 ## IntelliJ auto-format diverges from Spotless
 
-- The open IDE reformats `.java` files on open/save, and its style differs from the Spotless config (import grouping: IJ keeps `java.**` in
-  its own group per `.editorconfig`, Spotless' bare
-  `<importOrder/>` wants one flat alphabetical group; IJ aligns call args with `tab+space`,
-  Spotless wants tabs only). This has caused `spotless:check` failures twice.
-- Always run `./mvnw -pl <module> spotless:apply` as the **last** step before `verify`, after any
-  IDE has touched the files. Do not trust a green build from before the file was opened in IntelliJ.
+- The open IDE reformats `.java` files on open/save; its style differs from the Spotless config, which
+  caused `spotless:check` failures repeatedly.
+- **Import order (fixed 2026-09-04).** Bare `<importOrder/>` (static first, one flat group) fought
+  `.editorconfig`'s `ij_java_imports_layout = *, |, javax.**, java.**, |, $*`. The parent pom now pins
+  `<importOrder><order>,javax|java,\#</order></importOrder>` to match `.editorconfig`, so `spotless:apply`
+  and the IDE produce the same import block. `spotless:check` only fails, never edits — the two editors
+  are `spotless:apply` and IntelliJ.
+- **Still diverges: multiline arg alignment.** IJ (`ij_java_align_multiline_parameters_in_calls = true`)
+  aligns wrapped call args with `tab+space`; Spotless `<indent><tabs>` wants tabs only. Not yet
+  reconciled.
+- Always run `./mvnw spotless:apply` as the **last** step before `verify`, after any IDE has touched the
+  files. Do not trust a green build from before the file was opened in IntelliJ.
 
 ## Boot 4 web starter name
 

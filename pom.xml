@@ -143,7 +143,9 @@
 					<version>${spotless-maven-plugin.version}</version>
 					<configuration>
 						<java>
-							<importOrder/>
+							<importOrder>
+								<order>,javax|java,\#</order>
+							</importOrder>
 							<removeUnusedImports/>
 							<formatAnnotations/>
 							<trimTrailingWhitespace/>
