@@ -22,7 +22,7 @@ separate and out of scope here — no AI code in this wave.
 
 - [x] Scaffold the `spring-boot-training` application module via the `maven-scaffold` skill (runnable module: `spring-boot-maven-plugin`,
   register in parent `<modules>`), tab-aware
-  Spotless Java config, `spring-boot-starter-web` + `-actuator` baseline, compile + `spotless:check`.
+  Spotless Java config, `spring-boot-starter-webmvc` + `-actuator` baseline, compile + `spotless:check`.
   Done: `TrainingApplication` + minimal `application.yml` + context-loads test; `./mvnw verify`
   and `spotless:check` green. Deviations: (a) parent Spotless `<java>` config (indent-tabs +
   importOrder + removeUnusedImports + trimTrailingWhitespace, no opinionated formatter) was
@@ -33,10 +33,20 @@ separate and out of scope here — no AI code in this wave.
 
 ## U1 — Development Environment & Project Setup (2h)
 
-- [ ] **1.1 Spring Boot introduction** — `TrainingApplication` with `@SpringBootApplication`,
+- [x] **1.1 Spring Boot introduction** — `TrainingApplication` with `@SpringBootApplication`,
   `SpringApplication` customization (banner mode, listeners), a short doc/README on starters &
   auto-configuration, `--debug` auto-config report notes, custom `banner.txt`, Actuator
   `health` + `info` exposed, `spring.threads.virtual.enabled=true`.
+  Done: `main` builds a `SpringApplication` instance (`setBannerMode` + `addListeners`);
+  `StartupListener` on `ApplicationReadyEvent`; `banner.txt`; `application.yml` `info.app.*`
+	+ env contributor; module `README.md` (1.1 section); `ActuatorEndpointsTest`
+	  (`MockMvcTester`, health + info). `./mvnw -pl spring-boot-training verify` and
+	  `spotless:check` green. Deviations: (a) switched the scaffold's instance `void main` to the
+	  classic `public static void main(String[])` so the `SpringApplication` customization is
+	  explicit for teaching. (b) `build-info` / `git-commit-id` and the banner's
+	  `${application.version}` are deferred to 1.2. (c) `compose.yaml` + Postgres +
+	  `spring-boot-docker-compose` (listed under 1.3) deferred to U3.1 where a real datasource
+	  lands.
 - [ ] **1.2 Maven** — the module pom itself as the teaching artifact (commented starters, build-info
 	+ git-commit-info goals wired, `spring-boot:run` / `spring-boot:build-image` notes), profile
 	  activation example.
@@ -111,4 +121,22 @@ separate and out of scope here — no AI code in this wave.
 
 ## Review
 
-_(filled in as topics are completed)_
+### 1.1 Spring Boot introduction (done)
+
+- `TrainingApplication`: `main` now builds a `SpringApplication` (`setBannerMode(CONSOLE)` +
+  `addListeners(new StartupListener())`) instead of the static `run`. Switched from the
+  scaffold's instance `void main` to `public static void main(String[])` for teaching clarity.
+- `StartupListener implements ApplicationListener<ApplicationReadyEvent>` — logs app name +
+  active profiles + `--debug` hint via SLF4J.
+- `banner.txt` with `${AnsiColor.*}` + `${spring-boot.formatted-version}` +
+  `${application.version}` (latter blank until 1.2 build-info).
+- `application.yml`: added `info.app.{name,description}`, kept env info contributor; comments
+  on the actuator + virtual-threads keys.
+- `README.md`: 1.1 section — `@SpringBootApplication` breakdown, starters table,
+  auto-config inspection (`--debug`, `/actuator/conditions`), banner, actuator, virtual threads.
+- `ActuatorEndpointsTest` (`@SpringBootTest`, autowires `HealthEndpoint` + `InfoEndpoint`
+  beans, no HTTP): health → `UP`, info → `app.name`.
+- Boot 4 package moves discovered: `@AutoConfigureMockMvc` → `spring-boot-webmvc-test`
+  (not transitive), `HealthEndpoint` → `spring-boot-health`, `TestRestTemplate` out of
+  `spring-boot-test` core. MVC slice tests will need the extra dep in U4.5.
+- `./mvnw -pl spring-boot-training verify` → 3 tests green; `spotless:check` clean.

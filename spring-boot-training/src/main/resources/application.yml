@@ -3,16 +3,25 @@ spring:
     name: spring-boot-training
   threads:
     virtual:
+      # Java 21+ virtual threads for request handling and @Async; keeps blocking code cheap under load.
       enabled: true
 
 management:
   endpoints:
     web:
       exposure:
+        # Topic 1.1 only needs health + info. Later units add metrics, prometheus, etc. on a management port.
         include: health,info
   endpoint:
     health:
       show-details: always
   info:
     env:
+      # Lets the `info:` tree below surface through the /actuator/info endpoint.
       enabled: true
+
+# Static values exposed by /actuator/info via the env contributor. Build/git metadata is added in topic 1.2.
+info:
+  app:
+    name: ${spring.application.name}
+    description: Spring Boot fundamentals training module
