@@ -24,6 +24,20 @@ Patterns captured after user corrections. Review at session start.
   wrong. Fixed in `pom.xml`, `spring-boot-training/pom.xml`, `CLAUDE.md`, and the `maven-scaffold`
   skill (v1.1.0).
 
+## IntelliJ auto-format diverges from Spotless
+
+- The open IDE reformats `.java` files on open/save, and its style differs from the Spotless config (import grouping: IJ keeps `java.**` in
+  its own group per `.editorconfig`, Spotless' bare
+  `<importOrder/>` wants one flat alphabetical group; IJ aligns call args with `tab+space`,
+  Spotless wants tabs only). This has caused `spotless:check` failures twice.
+- Always run `./mvnw -pl <module> spotless:apply` as the **last** step before `verify`, after any
+  IDE has touched the files. Do not trust a green build from before the file was opened in IntelliJ.
+
+## Boot 4 web starter name
+
+- Use `spring-boot-starter-webmvc`, not `spring-boot-starter-web` (the 4.1 POM marks the latter
+  deprecated). Recorded in CLAUDE.md tech-stack table and `maven-scaffold` v1.1.1.
+
 ## Overriding `<build><resources>`
 
 - Overriding `<resources>` replaces Boot's default entirely. Always use the two-block form (one filtered

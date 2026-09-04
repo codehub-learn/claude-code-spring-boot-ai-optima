@@ -1,9 +1,13 @@
 # Changelog
 
-## 1.1.0 - 2026-09-03 19:45
+## 1.1.1 - 2026-09-04 11:08
 
-- Clarified the groupId rule: the reactor `groupId` is always the flat `gr.codelearn`, never `gr.codelearn.<product>`. The product name
-  lives in the `artifactId` and the Java package. Fixed the parent skeleton's `<groupId>` placeholder accordingly.
+- Added a rule that web modules use `spring-boot-starter-webmvc` (the Boot 4 name), never the deprecated `spring-boot-starter-web` alias.
+
+## 1.1.0 - 2026-09-04 11:08
+
+- Added the three pom shapes (parent, aggregator, code module) with their exact section order and the rules every pom must follow (baseline
+  entry; predates the changelog convention).
 
 ## 1.0.0 - 2026-09-03 13:25
 

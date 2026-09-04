@@ -2,7 +2,7 @@
 name: maven-scaffold
 description: |
 	Use when creating or modifying Maven pom files in this reactor: "create the parent pom", "add an aggregator / module group", "add a module / product / app", or any pom skeleton / section-order question. Provides the three pom shapes (parent, aggregator, code module), their exact section order, and the rules every pom must follow.
-version: 1.1.0
+version: 1.1.1
 author: Constantinos Giannacoulis
 ---
 
@@ -26,6 +26,8 @@ app", generate the matching skeleton below.
   line between groups.
 - Native Boot structured logging is the choice (see *Observability* in `CLAUDE.md`): do **not** exclude `spring-boot-starter-logging`, do
   **not** add Log4j2 / Disruptor, do **not** add a log4j version-ban enforcer rule.
+- Web modules use `spring-boot-starter-webmvc` (the Boot 4 name for Spring MVC + embedded Tomcat), never the deprecated
+  `spring-boot-starter-web` alias.
 
 ## Parent pom (`packaging = pom`, at the repo root)
 

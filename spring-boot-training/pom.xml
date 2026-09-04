@@ -19,10 +19,10 @@
 
 	<!-- Dependencies -->
 	<dependencies>
-		<!-- Web: REST controllers, embedded Tomcat, Jackson 3 -->
+		<!-- Web MVC: REST controllers, embedded Tomcat, Jackson 3 (Boot 4 name; supersedes spring-boot-starter-web) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-web</artifactId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
 		<!-- Observability base: Actuator health/info endpoints -->
