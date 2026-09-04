@@ -37,47 +37,13 @@ separate and out of scope here — no AI code in this wave.
   `SpringApplication` customization (banner mode, listeners), a short doc/README on starters &
   auto-configuration, `--debug` auto-config report notes, custom `banner.txt`, Actuator
   `health` + `info` exposed, `spring.threads.virtual.enabled=true`.
-  Done: `main` builds a `SpringApplication` instance (`setBannerMode` + `addListeners`);
-  `StartupListener` on `ApplicationReadyEvent`; `banner.txt`; `application.yml` `info.app.*`
-	+ env contributor; module `README.md` (1.1 section); `ActuatorEndpointsTest`
-	  (`MockMvcTester`, health + info). `./mvnw -pl spring-boot-training verify` and
-	  `spotless:check` green. Deviations: (a) switched the scaffold's instance `void main` to the
-	  classic `public static void main(String[])` so the `SpringApplication` customization is
-	  explicit for teaching. (b) `build-info` / `git-commit-id` and the banner's
-	  `${application.version}` are deferred to 1.2. (c) `compose.yaml` + Postgres +
-	  `spring-boot-docker-compose` (listed under 1.3) deferred to U3.1 where a real datasource
-	  lands.
 - [x] **1.2 Maven** — the module pom itself as the teaching artifact (commented starters, build-info
 	+ git-commit-info goals wired, `spring-boot:run` / `spring-boot:build-image` notes), profile
 	  activation example.
-	  Done: `spring-boot-maven-plugin` gains a `build-info` execution; `git-commit-id-maven-plugin`
-	  listed (version/execution/config inherited from the Boot parent) → `git.properties`; starter
-	  block gains a BOM/version-management comment; module `<profiles>` with `local`
-	  (`activeByDefault`) + `ci` (`env.CI` property) both setting `spring-boot.run.profiles`;
-	  `application.yml` enables `management.info.git.mode=full` + `build`; `README.md` 1.2 section (reactor/wrapper, starters+BOM,
-	  `spring-boot:run`, `spring-boot:build-image`, build/git info
-	  table, profile-activation footgun, banner-version note); `ActuatorEndpointsTest` gains a
-	  `build`/`git` info-group assertion. `./mvnw verify` + `spotless:check` green (4 tests).
-	  Deviations: (a) `spotless:apply` also re-fixed `StartupListener` imports/continuation-indent
-	  that an IDE reformat had drifted (unrelated to 1.2, kept). (b) Banner `${application.version}`
-	  clarified as manifest-sourced (shows for the built jar, blank under `spring-boot:run`) — the
-	  1.1 note that build-info would fill it was wrong; build/git data goes to `/actuator/info`.
 - [x] **1.3 Project setup** — `application.yml` + `application-local.yml` + `application-test.yml`,
   `AppProperties` record (`@ConfigurationProperties("app")` + `@Validated`) with a nested block,
   native structured JSON console logging config, `spring-boot-docker-compose` wiring to a
   Postgres + pgvector-less Postgres service in `compose.yaml`, DevTools note.
-  Done: `spring-boot-starter-validation` + `spring-boot-devtools` (optional/runtime) added;
-  `config/AppProperties` record (`@Validated`, nested `Catalog` + `Cors`, Jakarta constraints,
-  `@DefaultValue` on nested `Catalog`, `@Nullable description`); `@ConfigurationPropertiesScan`
-  on `TrainingApplication`; `@NullMarked` `package-info` for root + `config`; `application.yml`
-  gains `app.*` tree + `logging.structured.format.console=ecs` (+ `ecs.service.*`);
-  `application-local.yml` (structured logging off, DEBUG, all actuator endpoints, DevTools) and
-  `application-test.yml` (banner off, quiet logs, test `app.*`); existing tests get
-  `@ActiveProfiles("test")`; `AppPropertiesTest` (`ApplicationContextRunner`: binding + 2
-  validation-failure cases); root `.gitignore` added; `README.md` 1.3 section. `./mvnw verify` +
-  `spotless:check` green (7 tests); ran the built jar to confirm ECS JSON on stdout.
-  Deviation: the `spring-boot-docker-compose` + Postgres + `compose.yaml` piece is deferred to
-  U3.1 (per the 1.1-review decision — nothing to wire a datasource to yet); README says so.
 
 ## U2 — Core Spring Framework Concepts (6h)
 

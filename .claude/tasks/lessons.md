@@ -2,6 +2,14 @@
 
 Patterns captured after user corrections. Review at session start.
 
+## todo.md: never edit the checklist item text
+
+- In `.claude/tasks/todo.md`, the `- [ ]` items are the plan. Only ever flip `[ ]` -> `[x]` when a topic
+  is complete. Do **not** append "Done: ..." / "Deviations: ..." to the item body — that goes in the
+  `## Review` section as a `### <topic> (done)` block. User correction, 2026-09-04.
+- Never add a new checklist step on your own. The user adds steps (e.g. "1.4") explicitly; when asked,
+  ask the clarifying questions needed to pin down its scope before writing it into the plan.
+
 ## Toolchain / version pins
 
 - **Never guess a patch version for a pinned toolchain.** When proposing the Maven wrapper version I picked
@@ -59,6 +67,16 @@ Patterns captured after user corrections. Review at session start.
   with a fallback, use `@DefaultValue("...")` with the literal.
 - A `@NotNull @Valid Nested x` with no `@DefaultValue` binds to `null` when the sub-prefix is absent and then
   trips `@NotNull` — intended when the block is mandatory, a bug when you meant "optional with defaults".
+
+## Banner `${application.version}` under `spring-boot:run`
+
+- Boot's built-in `${application.version}` / `${application.formatted-version}` banner tokens read the jar
+  manifest `Implementation-Version` — absent under `spring-boot:run`, so they render blank there. (build-info
+  does NOT feed the banner; it feeds `/actuator/info`.)
+- Fix: put `@project.version@` in `banner.txt` and add `**/banner.txt` to the **filtered** `<resources>` block (and to the unfiltered
+  block's excludes) in the reactor parent. The `@...@` delimiter (set by
+  spring-boot-starter-parent) leaves Spring's `${AnsiColor.*}` / `${spring-boot.formatted-version}` intact.
+  Works for both `spring-boot:run` and the packaged jar.
 
 ## JSpecify `@NullMarked` does not cascade
 
