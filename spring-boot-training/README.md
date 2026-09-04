@@ -129,3 +129,47 @@ from the jar manifest `Implementation-Version`. That is populated by `repackage`
 value shows when you run the built jar (`java -jar target/...jar`) but stays blank under
 `spring-boot:run`, which never packages. Build/git details belong in `/actuator/info`, not
 the banner.
+
+### 1.3 Project setup
+
+**Config file layout.**
+
+| File                    | Loaded when                                          | Holds                                                                    |
+|-------------------------|------------------------------------------------------|--------------------------------------------------------------------------|
+| `application.yml`       | always                                               | shared defaults, prod-safe (structured logging on)                       |
+| `application-local.yml` | `local` profile (`./mvnw spring-boot:run`, see 1.2)  | dev ergonomics: readable logs, `DEBUG`, all actuator endpoints, DevTools |
+| `application-test.yml`  | tests that declare `@ActiveProfiles("test")`, and CI | quiet logging, banner off, test-only `app.*` values                      |
+
+Profile files override, not replace: a `local` run still gets everything in
+`application.yml` plus the `local` overrides. Secrets never go in any of these; they come
+from the environment or a git-ignored `.env` (the root `.gitignore` has an `.env` block).
+
+**Typed configuration.** `config/AppProperties` is a `record` annotated
+`@ConfigurationProperties("app")` + `@Validated`. `@ConfigurationPropertiesScan` on the
+application class registers it (no `@EnableConfigurationProperties` list). It shows:
+
+- immutable binding into a record and a nested record (`Catalog`, `Cors`);
+- `@DefaultValue` so `application.yml` only carries overrides (`app.catalog.*` can be
+  omitted entirely and the nested record still binds);
+- Jakarta constraints (`@NotBlank`, `@NotEmpty`, `@Positive`, `@Max`) enforced at startup —
+  a bad value aborts the context with a readable report instead of failing later. Relaxed
+  binding maps `app.catalog.default-page-size` (yaml) to `defaultPageSize` (record).
+
+Prefer this over scattered `@Value`. `AppPropertiesTest` uses `ApplicationContextRunner` to
+cover both binding and a validation failure without a full `@SpringBootTest`.
+
+**Structured logging.** `application.yml` sets
+`logging.structured.format.console: ecs` — native Boot structured logging (no Logback XML,
+no Logstash encoder dependency), emitting Elastic Common Schema JSON to stdout with
+`service.name/version/environment`. Once tracing is wired it also carries `traceId`/`spanId`
+so Loki can correlate. `application-local.yml` and `application-test.yml` set
+`logging.structured.format.console:` empty to fall back to the human-readable pattern.
+
+**DevTools.** `spring-boot-devtools` is an `optional`, `runtime` dependency: automatic
+restart on a classpath change and LiveReload while developing. Boot disables it in a fully
+packaged jar and `optional=true` keeps it off any downstream classpath, so it is safe to
+leave declared. `application-test.yml` turns restart off for tests.
+
+**Docker Compose / Postgres** (`spring-boot-docker-compose` + a `compose.yaml` Postgres
+service) is deferred to U3.1, where the first real datasource lands and there is something
+for it to wire.

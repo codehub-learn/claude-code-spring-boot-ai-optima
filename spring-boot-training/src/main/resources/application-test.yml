@@ -1,0 +1,30 @@
+# Test profile. Loaded by any @SpringBootTest / slice test that sets @ActiveProfiles("test"), and by the
+# Maven build in CI (the `ci` Maven profile sets spring-boot.run.profiles=test).
+
+spring:
+  main:
+    # Tests do not need the ASCII banner in their output.
+    banner-mode: off
+  devtools:
+    restart:
+      enabled: false
+
+logging:
+  structured:
+    format:
+      # Keep test output readable; JSON assertions are not what these tests check.
+      console:
+  level:
+    root: WARN
+    gr.codelearn.springbootai.training: INFO
+
+# Override the validated config with test-only values so binding is exercised without depending on
+# application.yml staying put.
+app:
+  name: Training (test)
+  catalog:
+    default-page-size: 5
+    max-page-size: 10
+  cors:
+    allowed-origins:
+      - http://localhost

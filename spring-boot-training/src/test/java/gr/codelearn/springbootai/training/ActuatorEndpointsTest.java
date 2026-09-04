@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.info.InfoEndpoint;
 import org.springframework.boot.health.actuate.endpoint.HealthEndpoint;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.InstanceOfAssertFactories.map;
@@ -17,6 +18,7 @@ import static org.assertj.core.api.InstanceOfAssertFactories.map;
  * fire before the {@code test} phase); running only this class from an IDE without that step will not have generated the files.
  */
 @SpringBootTest
+@ActiveProfiles("test")
 class ActuatorEndpointsTest {
 	@Autowired
 	private HealthEndpoint healthEndpoint;

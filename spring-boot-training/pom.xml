@@ -36,6 +36,21 @@
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
+		<!-- Bean Validation (Hibernate Validator): drives @Validated on @ConfigurationProperties and, later, on controllers -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
+		<!-- DevTools: automatic restart + LiveReload while developing. optional=true so it never leaks onto a
+		     downstream classpath; Boot also disables it automatically in a fully packaged jar. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-devtools</artifactId>
+			<scope>runtime</scope>
+			<optional>true</optional>
+		</dependency>
+
 		<!-- Testing: JUnit 5, AssertJ, Spring Boot test slices, MockMvcTester -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

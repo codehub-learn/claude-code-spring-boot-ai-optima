@@ -1,0 +1,30 @@
+# Local development profile. Activated by `./mvnw spring-boot:run` (the Maven `local` profile sets
+# spring-boot.run.profiles=local) or by running with -Dspring.profiles.active=local from the IDE.
+#
+# This file is committed on purpose: it holds no secrets, only developer-ergonomics overrides. Real
+# secrets (API keys, DB passwords) belong in a git-ignored .env or environment variables.
+
+logging:
+  structured:
+    format:
+      # Empty => disable the ECS JSON layout from application.yml and fall back to the readable console pattern.
+      console:
+  level:
+    gr.codelearn.springbootai.training: DEBUG
+    # Uncomment to see the datasource / SQL once persistence lands in U3:
+    # org.hibernate.SQL: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Everything is fair game locally; non-local profiles stay locked down (see application.yml).
+        include: "*"
+
+spring:
+  devtools:
+    restart:
+      # Auto-restart on classpath change. LiveReload (browser refresh) is on by default on port 35729.
+      enabled: true
+    livereload:
+      enabled: true

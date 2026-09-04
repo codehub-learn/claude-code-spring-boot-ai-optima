@@ -48,3 +48,20 @@ Patterns captured after user corrections. Review at session start.
 - Overriding `<resources>` replaces Boot's default entirely. Always use the two-block form (one filtered
   resource limited to `application*.yml/yaml/properties`, one unfiltered resource excluding those) or non-config
   resources (prompts, templates, static) silently stop being copied.
+
+## `@ConfigurationProperties` record: `@DefaultValue` rules
+
+- A **bare** `@DefaultValue` (no value) on a scalar record component (`String`, `int`, ...) fails binding at
+  startup: `IllegalStateException: Parameter of type java.lang.String must have a non-empty default value`.
+- Bare `@DefaultValue` is only valid on a **nested value-object** parameter — it tells Boot to instantiate the
+  nested record from its own per-field defaults even when the whole sub-prefix is absent.
+- For a genuinely optional scalar, use `@Nullable` (JSpecify) and no `@DefaultValue`; for an optional scalar
+  with a fallback, use `@DefaultValue("...")` with the literal.
+- A `@NotNull @Valid Nested x` with no `@DefaultValue` binds to `null` when the sub-prefix is absent and then
+  trips `@NotNull` — intended when the block is mandatory, a bug when you meant "optional with defaults".
+
+## JSpecify `@NullMarked` does not cascade
+
+- `@NullMarked` on a `package-info.java` covers that package only, not sub-packages. Add one
+  `@NullMarked package-info.java` per package. `org.jspecify` is already on the compile classpath via
+  Spring Framework 7, no explicit dependency needed.

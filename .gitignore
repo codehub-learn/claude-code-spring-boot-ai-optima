@@ -94,6 +94,12 @@ node
 docker/data/**
 docker/tom-frontend/
 
+# Local environment / secrets. application-local.yml is committed on purpose (dev ergonomics,
+# no secrets); real secrets (API keys, DB passwords) go in a git-ignored .env or the environment.
+.env
+.env.*
+!.env.example
+
 **/logs/
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml

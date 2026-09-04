@@ -3,6 +3,7 @@ package gr.codelearn.springbootai.training;
 import org.springframework.boot.Banner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
  * Entry point for the training module.
@@ -13,8 +14,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  *
  * <p>Rather than the one-line {@code SpringApplication.run(...)}, this {@code main} builds a
  * {@link SpringApplication} instance so the customization hooks (banner mode, bootstrap listeners) are explicit.
+ *
+ * <p>{@code @ConfigurationPropertiesScan} (topic 1.3) registers every {@code @ConfigurationProperties} record in
+ * this package tree ({@link gr.codelearn.springbootai.training.config.AppProperties}) without an explicit
+ * {@code @EnableConfigurationProperties} list.
  */
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class TrainingApplication {
 	static void main(final String[] args) {
 		final var application = new SpringApplication(TrainingApplication.class);

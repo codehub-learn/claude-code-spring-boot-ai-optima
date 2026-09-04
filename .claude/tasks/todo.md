@@ -62,10 +62,22 @@ separate and out of scope here — no AI code in this wave.
 	  that an IDE reformat had drifted (unrelated to 1.2, kept). (b) Banner `${application.version}`
 	  clarified as manifest-sourced (shows for the built jar, blank under `spring-boot:run`) — the
 	  1.1 note that build-info would fill it was wrong; build/git data goes to `/actuator/info`.
-- [ ] **1.3 Project setup** — `application.yml` + `application-local.yml` + `application-test.yml`,
+- [x] **1.3 Project setup** — `application.yml` + `application-local.yml` + `application-test.yml`,
   `AppProperties` record (`@ConfigurationProperties("app")` + `@Validated`) with a nested block,
   native structured JSON console logging config, `spring-boot-docker-compose` wiring to a
   Postgres + pgvector-less Postgres service in `compose.yaml`, DevTools note.
+  Done: `spring-boot-starter-validation` + `spring-boot-devtools` (optional/runtime) added;
+  `config/AppProperties` record (`@Validated`, nested `Catalog` + `Cors`, Jakarta constraints,
+  `@DefaultValue` on nested `Catalog`, `@Nullable description`); `@ConfigurationPropertiesScan`
+  on `TrainingApplication`; `@NullMarked` `package-info` for root + `config`; `application.yml`
+  gains `app.*` tree + `logging.structured.format.console=ecs` (+ `ecs.service.*`);
+  `application-local.yml` (structured logging off, DEBUG, all actuator endpoints, DevTools) and
+  `application-test.yml` (banner off, quiet logs, test `app.*`); existing tests get
+  `@ActiveProfiles("test")`; `AppPropertiesTest` (`ApplicationContextRunner`: binding + 2
+  validation-failure cases); root `.gitignore` added; `README.md` 1.3 section. `./mvnw verify` +
+  `spotless:check` green (7 tests); ran the built jar to confirm ECS JSON on stdout.
+  Deviation: the `spring-boot-docker-compose` + Postgres + `compose.yaml` piece is deferred to
+  U3.1 (per the 1.1-review decision — nothing to wire a datasource to yet); README says so.
 
 ## U2 — Core Spring Framework Concepts (6h)
 
@@ -176,3 +188,34 @@ separate and out of scope here — no AI code in this wave.
   `git.properties` config — module pom only switches it on.
 - `./mvnw verify` → 4 tests green, `spotless:check` clean. `spotless:apply` also corrected
   `StartupListener` import order / continuation indent drifted by an IDE reformat.
+
+### 1.3 Project setup (done)
+
+- Deps: `spring-boot-starter-validation` (compile); `spring-boot-devtools`
+  (`runtime`, `optional=true`).
+- `config/AppProperties`: `record` + `@Validated` + `@ConfigurationProperties("app")`, nested
+  `Catalog` (page-size guard-rails, `Duration cacheTtl`) and `Cors` records. `@DefaultValue` on
+  the nested `Catalog` param so `app.catalog` can be omitted wholesale; `@Nullable description`
+  for a genuinely optional scalar; `@NotBlank` / `@NotEmpty` / `@Positive` / `@Max` elsewhere.
+  Registered via `@ConfigurationPropertiesScan` on `TrainingApplication`.
+- `package-info.java` (`@NullMarked`) for the root package and `config` — JSpecify does not
+  cascade, so one per package. `org.jspecify` is on the compile classpath via Spring Framework 7.
+- `application.yml`: `app.*` tree; `logging.structured.format.console: ecs` +
+  `logging.structured.ecs.service.{name,version,environment}` (version via `@project.version@`
+  filtering). `application-local.yml`: `console:` empty (readable logs), app pkg `DEBUG`, all
+  actuator endpoints, DevTools restart/livereload on. `application-test.yml`: banner off,
+  `root=WARN`, DevTools off, test-only `app.*`.
+- `ActuatorEndpointsTest` + `TrainingApplicationTests` get `@ActiveProfiles("test")`.
+- `AppPropertiesTest`: `ApplicationContextRunner` — binding + defaults, `@NotBlank` failure,
+  nested `@Positive` failure. No `@SpringBootTest`.
+- Root `.gitignore`: added a `.env` / `.env.*` (keep `.env.example`) block for secrets; the
+  rest (`target`, `.idea`, `*.log`, ...) was already there. `application-local.yml` stays
+  committed by design.
+- `README.md` 1.3 section: config-file table, typed-config rules, structured logging, DevTools,
+  and the explicit Docker-Compose/Postgres deferral to U3.1.
+- Verified: `./mvnw verify` → 7 tests green, `spotless:check` clean; ran the built jar and
+  confirmed ECS JSON logs on stdout (`@timestamp`, `service.*`, `ecs.version`) and the banner
+  now shows `app version 0.0.1-SNAPSHOT` (jar manifest, per 1.2).
+- Gotcha hit: a bare `@DefaultValue` on a `String` record component fails binding ("must have a non-empty default value"). Bare
+  `@DefaultValue` is only for nested value-object
+  params; use `@Nullable` for optional scalars. Recorded in lessons.
