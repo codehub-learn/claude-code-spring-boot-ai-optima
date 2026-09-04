@@ -47,7 +47,7 @@ separate and out of scope here — no AI code in this wave.
 
 ## U2 — Core Spring Framework Concepts (6h)
 
-- [ ] **2.1 Dependency injection** — `foundation.di` package: constructor injection baseline,
+- [x] **2.1 Dependency injection** — `foundation.di` package: constructor injection baseline,
   `@Qualifier` + `@Primary` with two impls of one interface, inject `List<T>` and
   `Map<String,T>`, `ObjectProvider` for optional/lazy, `@Profile`-scoped bean, a commented
   circular-dependency example + how Boot reports it.
@@ -188,3 +188,28 @@ separate and out of scope here — no AI code in this wave.
 - Gotcha hit: a bare `@DefaultValue` on a `String` record component fails binding ("must have a non-empty default value"). Bare
   `@DefaultValue` is only for nested value-object
   params; use `@Nullable` for optional scalars. Recorded in lessons.
+
+### 2.1 Dependency injection (done)
+
+- New package `gr.codelearn.springbootai.training.foundation.di` (+ its own `@NullMarked`
+  `package-info.java`; JSpecify does not cascade). No pom / module change — single runnable
+  module, as agreed.
+- `Notifier` interface + three package-private impls: `EmailNotifier` (`@Primary`, `@Order(10)`),
+  `SmsNotifier` (`@Order(20)`), `ConsoleNotifier` (`@Profile("local")`, `@Order(30)`). `send()`
+  returns `"<channel>:<message>"` so tests see which bean handled a call, no real I/O.
+- `NotificationDispatcher` (`@Component`, single constructor, no `@Autowired`) consumes every
+  style: bare `Notifier` → `@Primary`; `@Qualifier("smsNotifier")` overrides `@Primary`;
+  `List<Notifier>` (sorted by `@Order`); `Map<String, Notifier>` (keyed by bean name);
+  `ObjectProvider<ConsoleNotifier>` for the profile-gated optional bean. `@PostConstruct`
+  `logWiring()` prints a one-line INFO summary on every boot.
+- `CircularDependencyExample` — non-instantiable holder, Javadoc-only: the commented two-bean
+  constructor cycle, Boot 4's fail-fast "form a cycle" report, and the fix ladder (break it / `@Lazy` / `allow-circular-references`).
+- Tests (both `@SpringBootTest`, MOCK web env): `DependencyInjectionTest` (`@ActiveProfiles("test")`,
+  5 cases) — primary/qualifier resolution, `List` order, `Map` keys, `ConsoleNotifier` absent +
+  `ObjectProvider` empty. `DependencyInjectionLocalProfileTest` (`@ActiveProfiles({"test","local"})`,
+  2 cases) — console bean joins list/map in order, `ObjectProvider` resolves.
+- `README.md`: new `## U2` section with the 2.1 write-up (primary vs qualifier table, list/map,
+  `ObjectProvider`, `@Profile`, circular-dependency note + run command).
+- `./mvnw -pl spring-boot-training verify` → 14 tests green (was 7); `spotless:check` clean.
+  The two `ConfigurationPropertiesBindException` WARNs in the log are `AppPropertiesTest`'s
+  deliberate validation-failure cases, not new.

@@ -9,6 +9,8 @@ Patterns captured after user corrections. Review at session start.
   `## Review` section as a `### <topic> (done)` block. User correction, 2026-09-04.
 - Never add a new checklist step on your own. The user adds steps (e.g. "1.4") explicitly; when asked,
   ask the clarifying questions needed to pin down its scope before writing it into the plan.
+- New `### <topic> (done)` blocks are **appended at the end of the `## Review` section**, in completion
+  order (so 2.1 goes after 1.3, not right under the `## Review` heading). User correction, 2026-09-04.
 
 ## Toolchain / version pins
 

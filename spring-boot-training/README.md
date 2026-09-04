@@ -176,3 +176,53 @@ leave declared. `application-test.yml` turns restart off for tests.
 **Docker Compose / Postgres** (`spring-boot-docker-compose` + a `compose.yaml` Postgres
 service) is deferred to U3.1, where the first real datasource lands and there is something
 for it to wire.
+
+---
+
+## U2 — Core Spring Framework Concepts
+
+### 2.1 Dependency injection
+
+Lives in `foundation/di/` — a set of throwaway `Notifier` beans (`email`, `sms`, and a
+`local`-only `console`) plus one `NotificationDispatcher` that consumes every wiring style.
+
+**Constructor injection only.** `NotificationDispatcher` has a single constructor, so no
+`@Autowired` is needed. No field or setter injection anywhere in the codebase (CLAUDE.md
+rule); constructor injection keeps collaborators `final` and the object valid once built.
+
+**`@Primary` vs `@Qualifier`.** Three beans implement `Notifier`:
+
+| Injection point                      | Resolves to     | Why                                    |
+|--------------------------------------|-----------------|----------------------------------------|
+| `Notifier` (bare)                    | `EmailNotifier` | it is `@Primary`                       |
+| `@Qualifier("smsNotifier") Notifier` | `SmsNotifier`   | an explicit qualifier beats `@Primary` |
+
+The qualifier value is the default bean name (`smsNotifier`). A dedicated `@Qualifier`
+annotation would work too; bean name is the least ceremony for a demo.
+
+**`List<T>` and `Map<String, T>` injection.** `List<Notifier>` gets every implementation,
+sorted by `@Order` on each bean (`email` 10, `sms` 20, `console` 30). `Map<String, Notifier>`
+gets the same beans keyed by bean name. Both are copied defensively in the constructor.
+
+**`ObjectProvider<T>` for an optional bean.** `ConsoleNotifier` is `@Profile("local")`, so it
+is absent under `test` / default. `ObjectProvider<ConsoleNotifier>.getIfAvailable()` returns
+`null` there instead of throwing `NoSuchBeanDefinitionException`, and resolves the bean lazily
+when the `local` profile is on. Use it for 0-or-1 optional collaborators and to break eager
+init.
+
+**`@Profile`-scoped bean.** `ConsoleNotifier` only joins the context when `local` is active.
+`DependencyInjectionLocalProfileTest` runs with `@ActiveProfiles({"test", "local"})` and sees
+three notifiers; `DependencyInjectionTest` (`test` only) sees two.
+
+**Circular dependencies.** `CircularDependencyExample` is a commented note: two components
+that need each other via the constructor. Since Boot 2.6 that is rejected by default, so the
+context fails fast with a "form a cycle" report. Fixes, best first: break the cycle (extract a
+third bean, or use an event), inject one side `@Lazy`, or — last resort —
+`spring.main.allow-circular-references=true` (only rescues setter/field injection).
+
+Run the demo and watch the `NotificationDispatcher` `@PostConstruct` line:
+
+```bash
+./mvnw -pl spring-boot-training spring-boot:run
+# DI demo wired: default=email, urgent=sms, channels=[email, sms, console], console-present=true
+```
