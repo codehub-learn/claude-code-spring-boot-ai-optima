@@ -19,8 +19,16 @@ management:
     env:
       # Lets the `info:` tree below surface through the /actuator/info endpoint.
       enabled: true
+    git:
+      # 'full' shows branch, commit id/message/time, tags, dirty flag (from target/classes/git.properties,
+      # written by the git-commit-id goal). 'simple' (default) shows only branch + short id + time.
+      mode: full
+    build:
+      # 'build' info group, from META-INF/build-info.properties written by the spring-boot:build-info goal.
+      enabled: true
 
-# Static values exposed by /actuator/info via the env contributor. Build/git metadata is added in topic 1.2.
+# Static values exposed by /actuator/info via the env contributor. The 'build' and 'git' groups are
+# contributed automatically from the files produced by the Maven build (topic 1.2).
 info:
   app:
     name: ${spring.application.name}

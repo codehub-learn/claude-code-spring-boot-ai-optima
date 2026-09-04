@@ -47,9 +47,21 @@ separate and out of scope here — no AI code in this wave.
 	  `${application.version}` are deferred to 1.2. (c) `compose.yaml` + Postgres +
 	  `spring-boot-docker-compose` (listed under 1.3) deferred to U3.1 where a real datasource
 	  lands.
-- [ ] **1.2 Maven** — the module pom itself as the teaching artifact (commented starters, build-info
+- [x] **1.2 Maven** — the module pom itself as the teaching artifact (commented starters, build-info
 	+ git-commit-info goals wired, `spring-boot:run` / `spring-boot:build-image` notes), profile
 	  activation example.
+	  Done: `spring-boot-maven-plugin` gains a `build-info` execution; `git-commit-id-maven-plugin`
+	  listed (version/execution/config inherited from the Boot parent) → `git.properties`; starter
+	  block gains a BOM/version-management comment; module `<profiles>` with `local`
+	  (`activeByDefault`) + `ci` (`env.CI` property) both setting `spring-boot.run.profiles`;
+	  `application.yml` enables `management.info.git.mode=full` + `build`; `README.md` 1.2 section (reactor/wrapper, starters+BOM,
+	  `spring-boot:run`, `spring-boot:build-image`, build/git info
+	  table, profile-activation footgun, banner-version note); `ActuatorEndpointsTest` gains a
+	  `build`/`git` info-group assertion. `./mvnw verify` + `spotless:check` green (4 tests).
+	  Deviations: (a) `spotless:apply` also re-fixed `StartupListener` imports/continuation-indent
+	  that an IDE reformat had drifted (unrelated to 1.2, kept). (b) Banner `${application.version}`
+	  clarified as manifest-sourced (shows for the built jar, blank under `spring-boot:run`) — the
+	  1.1 note that build-info would fill it was wrong; build/git data goes to `/actuator/info`.
 - [ ] **1.3 Project setup** — `application.yml` + `application-local.yml` + `application-test.yml`,
   `AppProperties` record (`@ConfigurationProperties("app")` + `@Validated`) with a nested block,
   native structured JSON console logging config, `spring-boot-docker-compose` wiring to a
@@ -140,3 +152,27 @@ separate and out of scope here — no AI code in this wave.
   (not transitive), `HealthEndpoint` → `spring-boot-health`, `TestRestTemplate` out of
   `spring-boot-test` core. MVC slice tests will need the extra dep in U4.5.
 - `./mvnw -pl spring-boot-training verify` → 3 tests green; `spotless:check` clean.
+
+### 1.2 Maven (done)
+
+- `spring-boot-training/pom.xml`: `spring-boot-maven-plugin` gains a `build-info` execution (writes `META-INF/build-info.properties`);
+  `git-commit-id-maven-plugin` added to `<plugins>`
+  with no version/execution/config — all inherited from `spring-boot-starter-parent`'s
+  pluginManagement (`revision` execution, `generateGitPropertiesFile`, v9.2.0). Starter block
+  gains a comment explaining the BOM pins versions. New `<profiles>` section: `local`
+  (`activeByDefault`) and `ci` (`<property><name>env.CI</name>`), each setting
+  `spring-boot.run.profiles`.
+- `application.yml`: `management.info.git.mode: full`, `management.info.build.enabled: true`,
+  comments refreshed.
+- `README.md`: 1.2 section — reactor + wrapper, starters/BOM version management,
+  `spring-boot:run` (args, profiles), `spring-boot:build-image` (buildpacks, needs Docker),
+  build-info + git-commit-id goal table, profile-activation styles + `activeByDefault` footgun,
+  banner `${application.version}` = manifest `Implementation-Version` (jar only). Fixed the 1.1
+  notes that implied build-info fills the banner.
+- `ActuatorEndpointsTest`: new `infoEndpointExposesBuildAndGitGroups` asserting the `build`
+  (`artifact`, `time`) and `git` (`branch`, nested `commit`) groups. Javadoc notes these need a
+  full `./mvnw` run (both goals fire before `test`).
+- Boot parent already manages `git-commit-id-maven-plugin` version + `revision` execution +
+  `git.properties` config — module pom only switches it on.
+- `./mvnw verify` → 4 tests green, `spotless:check` clean. `spotless:apply` also corrected
+  `StartupListener` import order / continuation indent drifted by an IDE reformat.

@@ -50,12 +50,82 @@ calling the static `SpringApplication.run(...)`, so the hooks are visible:
 
 **Custom banner.** `src/main/resources/banner.txt` is picked up automatically. It uses
 `${AnsiColor.*}` for colour and `${spring-boot.formatted-version}` / `${application.version}`
-for versions. `application.version` stays blank under `spring-boot:run` until topic 1.2 wires
-`build-info`.
+for versions. `${application.version}` comes from the jar manifest, so it shows for the built
+jar but is blank under `spring-boot:run` (see 1.2).
 
 **Actuator `health` / `info`.** `application.yml` exposes only `health,info` over HTTP,
 sets `health.show-details: always`, and enables the env `info` contributor so the static
-`info.app.*` tree surfaces at `GET /actuator/info`. Build and git metadata arrive in 1.2.
+`info.app.*` tree surfaces at `GET /actuator/info`. Build and git metadata are wired in 1.2.
 
 **Virtual threads.** `spring.threads.virtual.enabled: true` makes request handling and
 `@Async` run on JDK virtual threads.
+
+### 1.2 Maven
+
+The module `pom.xml` is the teaching artifact here; read it top to bottom.
+
+**Reactor and wrapper.** The repo is a multi-module Maven reactor: a root parent pom (`packaging=pom`) plus this module. Always build
+through the wrapper (`./mvnw`,
+`.\mvnw.cmd` on Windows) so everyone uses the pinned Maven version (`maven.version` in the parent, enforced by `maven-enforcer-plugin`).
+Build just this
+module with `-pl spring-boot-training`, and its upstream modules too with `-am`.
+
+**Starters and version management.** Starters are curated dependency aggregates and are
+declared without a `<version>`. The reactor parent is `spring-boot-starter-parent`, which
+imports the Spring Boot BOM; that BOM pins every managed coordinate (and the versions of
+common plugins, including `spring-boot-maven-plugin` and `git-commit-id-maven-plugin`).
+Only unmanaged things (`mapstruct`, `spotless`, `jacoco`) carry an explicit `*.version`
+property in the parent.
+
+**`spring-boot:run`** launches the app in place, no packaging step:
+
+```bash
+./mvnw -pl spring-boot-training spring-boot:run
+# pass program arguments (auto-config report):
+./mvnw -pl spring-boot-training spring-boot:run -Dspring-boot.run.arguments=--debug
+# override the active Spring profile for this run:
+./mvnw -pl spring-boot-training spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+**`spring-boot:build-image`** builds an OCI image with Cloud Native Buildpacks, no
+Dockerfile, using the layered jar for cacheable layers:
+
+```bash
+./mvnw -pl spring-boot-training spring-boot:build-image \
+  -Dspring-boot.build-image.imageName=codelearn/spring-boot-training
+```
+
+It needs a running Docker (or podman) daemon. `repackage` (the executable fat jar) is
+already bound to the `package` phase by the parent, so `./mvnw package` produces
+`target/spring-boot-training-*.jar` that runs with `java -jar`.
+
+**Build and git metadata.** Two goals are wired in the module pom:
+
+| Goal                     | Output                           | Actuator surface         |
+|--------------------------|----------------------------------|--------------------------|
+| `spring-boot:build-info` | `META-INF/build-info.properties` | `/actuator/info` `build` |
+| `git-commit-id:revision` | `target/classes/git.properties`  | `/actuator/info` `git`   |
+
+Both run on every build (including `test`), so after any `./mvnw` invocation
+`GET /actuator/info` shows the artifact version, build time, branch, and commit.
+`git.mode: full` in `application.yml` expands the git block. The `git-commit-id` plugin
+inherits its version, `revision` execution, and configuration from the Boot parent; the
+module pom only lists it to switch it on.
+
+**Profile activation example.** The module pom defines two Maven profiles:
+
+- `local` uses `<activeByDefault>true</activeByDefault>` — active unless another profile
+  is explicitly selected. Selecting any other profile with `-P` silently switches it off;
+  that is the classic `activeByDefault` footgun.
+- `ci` uses `<activation><property><name>env.CI</name></property></activation>` — turns
+  itself on whenever the `CI` environment variable is set, no `-P` needed.
+
+Each profile only sets `spring-boot.run.profiles` (the Spring profile `spring-boot:run`
+starts with). Force a profile explicitly with `-Plocal` / `-Pci`, list active ones with
+`./mvnw -pl spring-boot-training help:active-profiles`.
+
+**Banner version.** `banner.txt` references `${application.version}`, which Boot resolves
+from the jar manifest `Implementation-Version`. That is populated by `repackage`, so the
+value shows when you run the built jar (`java -jar target/...jar`) but stays blank under
+`spring-boot:run`, which never packages. Build/git details belong in `/actuator/info`, not
+the banner.

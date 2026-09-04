@@ -19,13 +19,18 @@
 
 	<!-- Dependencies -->
 	<dependencies>
+		<!-- Starters are curated dependency aggregates. They carry no <version>: the reactor parent
+		     (spring-boot-starter-parent 4.1.x) imports the Spring Boot BOM, which pins every managed
+		     coordinate. Add a starter here, get a coherent, tested set of transitive libraries. -->
+
 		<!-- Web MVC: REST controllers, embedded Tomcat, Jackson 3 (Boot 4 name; supersedes spring-boot-starter-web) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
-		<!-- Observability base: Actuator health/info endpoints -->
+		<!-- Observability base: Actuator health/info endpoints. The 'build' and 'git' info groups
+		     light up automatically once the build-info and git-commit-id goals below produce their files. -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
@@ -42,19 +47,68 @@
 	<build>
 		<!-- Plugins -->
 		<plugins>
+			<!-- spring-boot-maven-plugin: `spring-boot:run` (dev), `repackage` (executable layered jar, bound to
+			     `package` by the parent), `spring-boot:build-image` (OCI image via Cloud Native Buildpacks, no Dockerfile) -->
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 				<configuration>
+					<!-- Compile-only processors: keep them out of the runtime classpath and the fat jar -->
 					<excludeGroupIds>
 						org.projectlombok,org.mapstruct
 					</excludeGroupIds>
+					<!-- Layered jar: splits deps / snapshot deps / app into layers that cache well in image builds -->
 					<layers>
 						<enabled>true</enabled>
 					</layers>
 					<mainClass>gr.codelearn.springbootai.training.TrainingApplication</mainClass>
 				</configuration>
+				<executions>
+					<!-- build-info goal: writes META-INF/build-info.properties (group, artifact, version, build time);
+					     Actuator's BuildInfoContributor surfaces it under /actuator/info -> "build" -->
+					<execution>
+						<id>build-info</id>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
+			<!-- git-commit-id-maven-plugin: version + `revision` execution + git.properties config are all inherited
+			     from the Boot parent's pluginManagement; listing it here just switches it on. Writes
+			     target/classes/git.properties, which Actuator's GitInfoContributor surfaces under /actuator/info -> "git" -->
+			<plugin>
+				<groupId>io.github.git-commit-id</groupId>
+				<artifactId>git-commit-id-maven-plugin</artifactId>
 			</plugin>
 		</plugins>
 	</build>
+
+	<!-- Profiles: two activation styles side by side. `local` is active unless another profile is
+	     explicitly selected (activeByDefault is disabled the moment you pass -P<other>); `ci` activates
+	     on its own whenever the CI environment variable is present. Each only sets the Spring profile
+	     that `spring-boot:run` starts with. -->
+	<profiles>
+		<profile>
+			<id>local</id>
+			<activation>
+				<activeByDefault>true</activeByDefault>
+			</activation>
+			<properties>
+				<spring-boot.run.profiles>local</spring-boot.run.profiles>
+			</properties>
+		</profile>
+		<profile>
+			<id>ci</id>
+			<activation>
+				<property>
+					<name>env.CI</name>
+				</property>
+			</activation>
+			<properties>
+				<spring-boot.run.profiles>test</spring-boot.run.profiles>
+			</properties>
+		</profile>
+	</profiles>
 </project>

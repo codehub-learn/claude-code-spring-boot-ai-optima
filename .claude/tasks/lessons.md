@@ -14,6 +14,11 @@ Patterns captured after user corrections. Review at session start.
 - `spring-boot-starter-parent` 4.1.x manages versions for `maven-enforcer-plugin`, `maven-compiler-plugin`,
   surefire/failsafe, `spring-boot-maven-plugin`. It does **not** manage `jacoco-maven-plugin` or
   `spotless-maven-plugin` — declare their versions via a `*.version` property.
+- It also fully preconfigures `io.github.git-commit-id:git-commit-id-maven-plugin` (v9.2.0 in 4.1.1):
+  version, a `revision` execution, and `generateGitPropertiesFile` → `target/classes/git.properties`.
+  To use it, just list the plugin (groupId + artifactId, no version, no execution) in the module
+  `<plugins>`. `spring-boot-maven-plugin` only gets a `repackage` execution from the parent — add a
+  `build-info` execution explicitly if you want `/actuator/info` build data.
 
 ## groupId is flat `gr.codelearn`
 
