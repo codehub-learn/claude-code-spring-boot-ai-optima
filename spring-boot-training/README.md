@@ -49,9 +49,9 @@ calling the static `SpringApplication.run(...)`, so the hooks are visible:
   `@EventListener`; `StartupListener` logs a summary on `ApplicationReadyEvent`.
 
 **Custom banner.** `src/main/resources/banner.txt` is picked up automatically. It uses
-`${AnsiColor.*}` for colour and `${spring-boot.formatted-version}` / `${application.version}`
-for versions. `${application.version}` comes from the jar manifest, so it shows for the built
-jar but is blank under `spring-boot:run` (see 1.2).
+`${AnsiColor.*}` for colour, `${spring-boot.formatted-version}` for the framework version, and
+Maven-filtered `@project.version@` for the app version (see 1.2 for why it is filtered rather
+than Boot's `${application.version}` token).
 
 **Actuator `health` / `info`.** `application.yml` exposes only `health,info` over HTTP,
 sets `health.show-details: always`, and enables the env `info` contributor so the static
@@ -124,11 +124,14 @@ Each profile only sets `spring-boot.run.profiles` (the Spring profile `spring-bo
 starts with). Force a profile explicitly with `-Plocal` / `-Pci`, list active ones with
 `./mvnw -pl spring-boot-training help:active-profiles`.
 
-**Banner version.** `banner.txt` references `${application.version}`, which Boot resolves
-from the jar manifest `Implementation-Version`. That is populated by `repackage`, so the
-value shows when you run the built jar (`java -jar target/...jar`) but stays blank under
-`spring-boot:run`, which never packages. Build/git details belong in `/actuator/info`, not
-the banner.
+**Banner version.** Boot's built-in `${application.version}` banner token reads the jar
+manifest `Implementation-Version`, which only exists in the packaged jar, so it is blank
+under `spring-boot:run`. Instead the banner uses `@project.version@`, expanded by Maven
+resource filtering at build time — `banner.txt` is added to the filtered `<resources>` in
+the reactor parent (alongside `application*.yml`), using the `@...@` delimiter so Spring's
+own `${...}` tokens (`${AnsiColor.*}`, `${spring-boot.formatted-version}`) pass through
+untouched. Result: the version shows for both `spring-boot:run` and the built jar. Build
+and git details still belong in `/actuator/info`, not the banner.
 
 ### 1.3 Project setup
 

@@ -241,7 +241,9 @@
 			</plugin>
 		</plugins>
 
-		<!-- Resources -->
+		<!-- Resources. Two blocks on purpose: overriding <resources> replaces Boot's default entirely, so the
+		     second (unfiltered) block keeps every other resource copied. Filtered files use the @...@ delimiter
+		     (set by spring-boot-starter-parent) so Spring's own ${...} placeholders survive. -->
 		<resources>
 			<resource>
 				<directory>src/main/resources</directory>
@@ -249,6 +251,9 @@
 					<include>**/application*.yml</include>
 					<include>**/application*.yaml</include>
 					<include>**/application*.properties</include>
+					<!-- banner.txt: lets @project.version@ resolve at build time, so the banner shows the
+					     version under `spring-boot:run` too (not only from the packaged jar's manifest). -->
+					<include>**/banner.txt</include>
 				</includes>
 				<filtering>true</filtering>
 			</resource>
@@ -258,6 +263,7 @@
 					<exclude>**/application*.yml</exclude>
 					<exclude>**/application*.yaml</exclude>
 					<exclude>**/application*.properties</exclude>
+					<exclude>**/banner.txt</exclude>
 				</excludes>
 				<filtering>false</filtering>
 			</resource>

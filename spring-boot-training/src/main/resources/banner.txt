@@ -8,4 +8,4 @@ ${AnsiColor.BRIGHT_GREEN}
                                         __/ |
                                        |___/
 ${AnsiColor.CYAN} :: Code.Learn :: Spring Boot fundamentals training
-${AnsiColor.DEFAULT} :: Spring Boot${spring-boot.formatted-version} :: app version ${application.version} ::
+${AnsiColor.DEFAULT} :: Spring Boot${spring-boot.formatted-version} :: app version @project.version@ ::

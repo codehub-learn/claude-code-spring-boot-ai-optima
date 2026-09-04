@@ -214,8 +214,11 @@ separate and out of scope here — no AI code in this wave.
 - `README.md` 1.3 section: config-file table, typed-config rules, structured logging, DevTools,
   and the explicit Docker-Compose/Postgres deferral to U3.1.
 - Verified: `./mvnw verify` → 7 tests green, `spotless:check` clean; ran the built jar and
-  confirmed ECS JSON logs on stdout (`@timestamp`, `service.*`, `ecs.version`) and the banner
-  now shows `app version 0.0.1-SNAPSHOT` (jar manifest, per 1.2).
+  confirmed ECS JSON logs on stdout (`@timestamp`, `service.*`, `ecs.version`).
+- Banner version follow-up: `${application.version}` was still blank under `spring-boot:run`
+  (Boot's token needs the jar manifest). Switched `banner.txt` to `@project.version@` and added
+  `**/banner.txt` to the filtered `<resources>` block in the reactor parent (excluded from the
+  unfiltered block). Confirmed the version now renders under both `spring-boot:run` and the jar.
 - Gotcha hit: a bare `@DefaultValue` on a `String` record component fails binding ("must have a non-empty default value"). Bare
   `@DefaultValue` is only for nested value-object
   params; use `@Nullable` for optional scalars. Recorded in lessons.

@@ -11,7 +11,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * constraint is violated. {@link ApplicationContextRunner} spins a tiny context per case, no {@code @SpringBootTest}.
  */
 class AppPropertiesTest {
-
 	private final ApplicationContextRunner runner =
 			new ApplicationContextRunner().withUserConfiguration(Enablement.class);
 
