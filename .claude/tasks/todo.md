@@ -55,7 +55,7 @@ separate and out of scope here — no AI code in this wave.
   singleton vs `prototype` scope demo, lifecycle (`@PostConstruct` / `DisposableBean` /
   `@Bean(initMethod/destroyMethod)`), `@Lazy`, custom `@ConditionalOnProperty`, a `FactoryBean`,
   a `BeanPostProcessor` that logs bean creation.
-- [ ] **2.3 Components** — `foundation.components` package: stereotype + component-scan example,
+- [x] **2.3 Components** — `foundation.components` package: stereotype + component-scan example,
   `@Value` vs `Environment` vs `@ConfigurationProperties` side by side, application events (`ApplicationEventPublisher`, `@EventListener`,
   async `@EventListener`,
   `@TransactionalEventListener`), a `@Scheduled` task, an `@Async` method, an AOP
@@ -246,3 +246,41 @@ separate and out of scope here — no AI code in this wave.
   and one paragraph per concept.
 - `./mvnw -pl spring-boot-training verify` → 26 tests green (was 14); `spotless:apply` then
   `spotless:check` clean.
+
+### 2.3 Components (done)
+
+- New package `gr.codelearn.springbootai.training.foundation.components` (+ `@NullMarked`
+  `package-info.java`). `ComponentsConfig` (`@Configuration @EnableAsync @EnableScheduling`) turns on
+  async + scheduling context-wide — every `@SpringBootTest` now has them; kept benign (one cheap
+  `@Scheduled` counter, long default interval).
+- Stereotypes: `MessageProvider` with `StaticMessageComponent` (`@Component`), `GreetingService`
+  (`@Service`, also the aspect target), `MessageRepositoryStub` (`@Repository`). `StereotypeInventory`
+  injects `List<MessageProvider>` and resolves each bean's stereotype via `AnnotatedElementUtils` +
+  `ClassUtils.getUserClass` (unwraps the CGLIB proxy on `GreetingService`).
+- `ConfigAccessDemo`: `app.name` read three ways — `@Value`, `Environment#getProperty`,
+  `AppProperties#name()` (reuses the existing 1.3 record; adds a `components` -> `config` package ref).
+- Events: `GreetingEvent` (record), `GreetingEventPublisher` (`ApplicationEventPublisher`),
+  `GreetingEventListener` with `@EventListener` (sync), `@Async @EventListener` (different thread,
+  `CountDownLatch` seam), and `@TransactionalEventListener(AFTER_COMMIT)` — wired but dormant (no
+  transaction manager until U3.1; live demo deferred to U3.4, per the `CircularDependencyExample`
+  precedent). `@Async` handler methods made `public` for reliable CGLIB proxying.
+- `HeartbeatTask`: `@Scheduled(fixedDelayString = "${app.foundation.heartbeat-interval:PT1H}")`;
+  `application.yml` sets `1h` (one beat at startup), `application-test.yml` sets `200ms`. Key is not
+  bound by `AppProperties` (no `foundation` field; binder ignores unknown keys) — read straight from
+  the annotation.
+- `AsyncGreeter.greetAsync` → `@Async CompletableFuture<String>`.
+- `ServiceTimingAspect`: `@Aspect @Around` logging elapsed millis, pointcut scoped to `@Service` beans
+  `within(..foundation.components..*)` so it will not catch U3/U4 services. Keeps `lastTiming()` for
+  the test.
+- Deps: Boot 4 has no `spring-boot-starter-aop` — it was renamed `spring-boot-starter-aspectj`
+  (`spring-aop` + `aspectjweaver`, no `spring-aspects` / LTW). Added `spring-tx` explicitly too, only
+  so `@TransactionalEventListener` compiles; U3.1's `spring-boot-starter-data-jpa` will bring it
+  transitively. Recorded both in lessons.
+- Tests (all `@SpringBootTest @ActiveProfiles("test")`, one shared context): `ComponentStereotypeTest`
+  (3), `ConfigAccessDemoTest` (1), `ApplicationEventsTest` (2), `SchedulingAndAsyncTest` (2),
+  `ServiceTimingAspectTest` (2).
+- IDE-vs-Spotless drift again (lessons.md): the open IDE reformatted five untouched files (`StartupListener`, `NotificationDispatcher`,
+  `AppPropertiesTest`, `ConditionalBeanTest`,
+  `LoggingBeanPostProcessorTest`) with tab+space continuation indent. `spotless:apply` reverted them
+  to tabs-only; the diffs are whitespace-only (`git diff -w` is empty).
+- `./mvnw -pl spring-boot-training verify` → 36 tests green (was 26); `spotless:check` clean.

@@ -269,3 +269,72 @@ bean in the context (filtered to this project's own packages) and records the be
 `LoggingBeanPostProcessorTest` confirms the eager singletons (`standardWidget`,
 `thirdPartyResource`) show up while the untouched `prototype` / `@Lazy` beans (`customWidget`,
 `lazyGreeter`) do not — the post-processor only ever sees beans that actually got created.
+
+### 2.3 Components
+
+Lives in `foundation/components/` — the component stereotypes plus the container services that build on
+them (events, scheduling, async, AOP). `ComponentsConfig` carries `@EnableAsync` and `@EnableScheduling`
+for the whole application context; that is where those two features get switched on.
+
+**Stereotypes are one scan.** `MessageProvider` has three implementations, one per stereotype:
+
+| Bean                     | Annotation    | What the annotation adds beyond `@Component`                         |
+|--------------------------|---------------|----------------------------------------------------------------------|
+| `StaticMessageComponent` | `@Component`  | nothing; it is the generic marker                                    |
+| `GreetingService`        | `@Service`    | semantic only; `ServiceTimingAspect`'s pointcut keys off it          |
+| `MessageRepositoryStub`  | `@Repository` | persistence-exception translation (dormant until a datasource lands) |
+
+`@Service` and `@Repository` are themselves meta-annotated `@Component`, so a single component scan finds
+all three and an injected `List<MessageProvider>` (`StereotypeInventory`) holds them all.
+`ComponentStereotypeTest` checks that with `AnnotatedElementUtils.hasAnnotation(...)`.
+
+**Three ways to read config.** `ConfigAccessDemo` reads the same key, `app.name`, three ways:
+
+| Style                                 | How                                | Trade-off                                                |
+|---------------------------------------|------------------------------------|----------------------------------------------------------|
+| `@Value("${app.name}")`               | resolved once at construction      | terse, but scatters string-literal keys through the code |
+| `Environment#getProperty("app.name")` | programmatic lookup, may be `null` | good when the key name is computed                       |
+| `AppProperties#name()`                | typed, validated record            | the house default: keys bound and validated in one place |
+
+All three return the same string; `ConfigAccessDemoTest` asserts that against the `application-test.yml`
+value.
+
+**Application events.** `GreetingEventPublisher` wraps `ApplicationEventPublisher`; `GreetingEvent` is a
+plain `record` (no need to extend `ApplicationEvent` since Spring 4.2). `GreetingEventListener` receives
+it three ways:
+
+| Listener                | Annotation                                  | Runs                                                  |
+|-------------------------|---------------------------------------------|-------------------------------------------------------|
+| `onGreeting`            | `@EventListener`                            | synchronously, on the publishing thread               |
+| `onGreetingAsync`       | `@Async @EventListener`                     | on the task executor, off the publisher's stack       |
+| `onGreetingAfterCommit` | `@TransactionalEventListener(AFTER_COMMIT)` | after the surrounding transaction commits (see below) |
+
+`ApplicationEventsTest` asserts the sync listener runs on the caller thread and the async one does not.
+The transactional listener is wired but stays dormant: there is no transaction manager in this module
+yet, so it is skipped at publish time. U3.4 exercises it for real once JPA brings a transaction manager.
+
+**`@Scheduled`.** `HeartbeatTask.beat()` runs on a timer. The interval is externalised as
+`app.foundation.heartbeat-interval` (`fixedDelayString`), defaulting to `1h` so a running app logs one
+beat at startup; `application-test.yml` shortens it to `200ms` so `SchedulingAndAsyncTest` does not wait.
+Needs `@EnableScheduling`.
+
+**`@Async`.** `AsyncGreeter.greetAsync(...)` returns a `CompletableFuture`; Spring's proxy hands the call
+to the executor and returns immediately. Same proxy rules as `@Transactional`: no effect on
+self-invocation, bean methods only. The executor is Boot's virtual-thread `SimpleAsyncTaskExecutor`
+(`spring.threads.virtual.enabled=true`). Needs `@EnableAsync`.
+
+**AOP timing aspect.** `ServiceTimingAspect` is an `@Around` aspect that logs elapsed millis for
+`@Service` methods. `spring-boot-starter-aspectj` (Boot 4's rename of `spring-boot-starter-aop`) puts
+`aspectjweaver` on the classpath, which is what activates Boot's AOP auto-configuration. The pointcut is
+scoped to `@Service` beans *in this package only*, so it will not silently start timing the real
+services added in U3/U4. `ServiceTimingAspectTest` confirms a `@Service` call is timed and a
+`@Repository` call is not.
+
+Run it and watch the startup log:
+
+```bash
+./mvnw -pl spring-boot-training spring-boot:run
+# MessageProvider beans found by component scan: {StaticMessageComponent=component, GreetingService=service, MessageRepositoryStub=repository}
+# app.name via @Value='...', via Environment='...', via @ConfigurationProperties='...'
+# Heartbeat #1 on '...'
+```

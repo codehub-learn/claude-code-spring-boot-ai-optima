@@ -59,6 +59,23 @@ Patterns captured after user corrections. Review at session start.
 - Use `spring-boot-starter-webmvc`, not `spring-boot-starter-web` (the 4.1 POM marks the latter
   deprecated). Recorded in CLAUDE.md tech-stack table and `maven-scaffold` v1.1.1.
 
+## Boot 4 AOP starter renamed; spring-tx not on the classpath by default
+
+- There is **no `spring-boot-starter-aop` in the Boot 4.1 BOM** — adding it fails with
+  "'dependencies.dependency.version' ... is missing". It was renamed **`spring-boot-starter-aspectj`**
+  (pulls `spring-aop` + `aspectjweaver`, no `spring-aspects`, no load-time weaving). `aspectjweaver` on
+  the classpath is what activates Boot's AOP auto-config / `@EnableAspectJAutoProxy`.
+- `spring-tx` is **not transitively present** with just webmvc + actuator + validation + aspectj.
+  `org.springframework.transaction.event.TransactionalEventListener` needs it. Added `spring-tx`
+  explicitly in 2.3 purely so the annotation compiles; U3.1's `spring-boot-starter-data-jpa` will
+  bring it (and a real `PlatformTransactionManager`) transitively. Without a transaction manager a
+  `@TransactionalEventListener` is silently skipped at publish time — fine for a "shown next to its
+  siblings, exercised later" demo.
+- CGLIB-proxied `@Service` beans: `@Component` / `@Service` / `@Repository` are **not `@Inherited`**, so
+  `AnnotatedElementUtils.hasAnnotation(bean.getClass(), ...)` fails on the proxy subclass. Unwrap first
+  with `ClassUtils.getUserClass(bean.getClass())` (or `AopUtils.getTargetClass`). Same reason a proxied
+  bean's `getClass().getSimpleName()` is `Xxx$$SpringCGLIB$$0`.
+
 ## Overriding `<build><resources>`
 
 - Overriding `<resources>` replaces Boot's default entirely. Always use the two-block form (one filtered

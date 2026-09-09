@@ -42,6 +42,21 @@
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
 
+		<!-- Spring AOP + AspectJ pointcut/annotation support: the @Aspect method-timing demo in
+		     foundation.components (topic 2.3). Boot 4 renamed spring-boot-starter-aop to -aspectj. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-aspectj</artifactId>
+		</dependency>
+
+		<!-- Spring transaction API: only for the @TransactionalEventListener in foundation.components (2.3).
+		     No transaction manager is wired yet, so it stays dormant until U3.1 brings spring-tx transitively
+		     via spring-boot-starter-data-jpa and U3.4 exercises it for real. -->
+		<dependency>
+			<groupId>org.springframework</groupId>
+			<artifactId>spring-tx</artifactId>
+		</dependency>
+
 		<!-- DevTools: automatic restart + LiveReload while developing. optional=true so it never leaks onto a
 		     downstream classpath; Boot also disables it automatically in a fully packaged jar. -->
 		<dependency>

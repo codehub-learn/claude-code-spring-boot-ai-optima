@@ -63,3 +63,8 @@ app:
     allowed-origins:
       - http://localhost:5173
     allow-credentials: false
+  # Not bound by AppProperties (it has no 'foundation' field, and the binder ignores unknown keys).
+  # Read straight from the @Scheduled(fixedDelayString) in foundation.components.HeartbeatTask (topic 2.3);
+  # a long interval means a running app logs one heartbeat at startup. application-test.yml shortens it.
+  foundation:
+    heartbeat-interval: 1h
