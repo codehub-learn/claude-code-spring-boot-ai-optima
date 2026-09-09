@@ -226,3 +226,46 @@ Run the demo and watch the `NotificationDispatcher` `@PostConstruct` line:
 ./mvnw -pl spring-boot-training spring-boot:run
 # DI demo wired: default=email, urgent=sms, channels=[email, sms, console], console-present=true
 ```
+
+### 2.2 Beans
+
+Lives in `foundation/beans/` — a `@Configuration` class (`BeansConfig`) wiring most of these via
+`@Bean` methods, plus a few `@Component`-scanned beans for the styles a `@Bean` method can't show.
+
+**Scope.** `BeansConfig` declares two `Widget` beans off the same class: `standardWidget()` (no
+`@Scope`, so singleton — one instance, created eagerly at context refresh) and `customWidget()`
+(`@Scope(SCOPE_PROTOTYPE)` — a new instance on every `getBean` call or injection point, created
+lazily, no destroy callback). `BeanScopeTest` asserts `isSameAs` / `isNotSameAs` across two lookups
+of each.
+
+**Lifecycle hooks — three styles, same effect:**
+
+| Style                      | Where                     | Init             | Destroy                    |
+|----------------------------|---------------------------|------------------|----------------------------|
+| JSR-250 annotations        | `AnnotationLifecycleBean` | `@PostConstruct` | `@PreDestroy`              |
+| Callback interface         | `InterfaceLifecycleBean`  | —                | `DisposableBean.destroy()` |
+| External wiring on `@Bean` | `ThirdPartyResource`      | `initMethod`     | `destroyMethod`            |
+
+The `@Bean(initMethod = ..., destroyMethod = ...)` style is for classes you cannot annotate (a
+library type); the other two are for your own classes. `BeanLifecycleTest` captures each bean
+reference inside `ApplicationContextRunner.run(...)`, then asserts the destroy flag *after* the
+runner closes the context, proving the callback actually fired.
+
+**`@Lazy`.** `lazyGreeter()` is `@Lazy`, so `LazyGreeter`'s constructor (and its static construction
+counter) only runs on first `getBean`, not during context refresh. `LazyBeanTest` checks the counter
+before and after touching the bean.
+
+**`@ConditionalOnProperty`.** `premiumSupportChannel()` only registers when
+`app.foundation.premium-support=true`. `ConditionalBeanTest` exercises absent (default), present (`=true`), and explicitly absent (`=false`)
+with `ApplicationContextRunner.withPropertyValues(...)`.
+
+**`FactoryBean<T>`.** `WidgetFactoryBean implements FactoryBean<Widget>` for when *building* the
+object needs more than a constructor call. `getBean("widgetFactoryBean")` (the default `@Component`
+name) returns the **product** (a `Widget`); `getBean("&widgetFactoryBean")` returns the factory
+itself — `WidgetFactoryBeanTest` checks both.
+
+**`BeanPostProcessor`.** `LoggingBeanPostProcessor` runs `postProcessAfterInitialization` for every
+bean in the context (filtered to this project's own packages) and records the bean names it saw.
+`LoggingBeanPostProcessorTest` confirms the eager singletons (`standardWidget`,
+`thirdPartyResource`) show up while the untouched `prototype` / `@Lazy` beans (`customWidget`,
+`lazyGreeter`) do not — the post-processor only ever sees beans that actually got created.

@@ -51,7 +51,7 @@ separate and out of scope here — no AI code in this wave.
   `@Qualifier` + `@Primary` with two impls of one interface, inject `List<T>` and
   `Map<String,T>`, `ObjectProvider` for optional/lazy, `@Profile`-scoped bean, a commented
   circular-dependency example + how Boot reports it.
-- [ ] **2.2 Beans** — `foundation.beans` package: `@Configuration` with several `@Bean` methods,
+- [x] **2.2 Beans** — `foundation.beans` package: `@Configuration` with several `@Bean` methods,
   singleton vs `prototype` scope demo, lifecycle (`@PostConstruct` / `DisposableBean` /
   `@Bean(initMethod/destroyMethod)`), `@Lazy`, custom `@ConditionalOnProperty`, a `FactoryBean`,
   a `BeanPostProcessor` that logs bean creation.
@@ -213,3 +213,36 @@ separate and out of scope here — no AI code in this wave.
 - `./mvnw -pl spring-boot-training verify` → 14 tests green (was 7); `spotless:check` clean.
   The two `ConfigurationPropertiesBindException` WARNs in the log are `AppPropertiesTest`'s
   deliberate validation-failure cases, not new.
+
+### 2.2 Beans (done)
+
+- New package `gr.codelearn.springbootai.training.foundation.beans` (+ `@NullMarked`
+  `package-info.java`). `BeansConfig` (`@Configuration`) hosts the `@Bean`-method demos; a few
+  supporting types are plain `@Component`s where a `@Bean` method can't show the point.
+- Scope: `Widget` via `standardWidget()` (singleton, default) and `customWidget()`
+  (`@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)`) — same class, two lifecycles.
+- Lifecycle, three styles on three classes: `AnnotationLifecycleBean`
+  (`@PostConstruct`/`@PreDestroy`), `InterfaceLifecycleBean` (`DisposableBean.destroy()`),
+  `ThirdPartyResource` (`@Bean(initMethod = "start", destroyMethod = "stop")` — the
+  "can't-annotate-a-library-class" case).
+- `LazyGreeter` (`@Lazy` on `BeansConfig.lazyGreeter()`) — a static construction counter proves
+  it isn't built until first `getBean`.
+- `PremiumSupportChannel` gated by `@ConditionalOnProperty(prefix = "app.foundation",
+  name = "premium-support", havingValue = "true")` — not wired into `AppProperties`, a raw
+  environment property is enough for the demo.
+- `WidgetFactoryBean implements FactoryBean<Widget>` — `@Component`-scanned; `getBean("widgetFactoryBean")`
+  returns the product, `getBean("&widgetFactoryBean")` the factory itself.
+- `LoggingBeanPostProcessor` (`@Component implements BeanPostProcessor`) — logs
+  `postProcessAfterInitialization` for beans under `gr.codelearn.springbootai.training`, keeps an
+  instance list (`observedBeanNames()`) for tests instead of static/shared state.
+- Tests, all `ApplicationContextRunner` (no full `@SpringBootTest`, matching `AppPropertiesTest`'s
+  isolated-context style): `BeanScopeTest` (2), `BeanLifecycleTest` (3, captures each bean via
+  `AtomicReference` and asserts the destroy flag after the runner closes the context),
+  `LazyBeanTest` (1, before/after construction-count delta), `ConditionalBeanTest` (3: absent /
+  `=true` / `=false`), `WidgetFactoryBeanTest` (2: plain name vs `&`-prefixed name),
+  `LoggingBeanPostProcessorTest` (1: eager singletons observed, untouched prototype/`@Lazy` beans
+  not).
+- `README.md`: new `### 2.2 Beans` section — scope table isn't needed, lifecycle-styles table,
+  and one paragraph per concept.
+- `./mvnw -pl spring-boot-training verify` → 26 tests green (was 14); `spotless:apply` then
+  `spotless:check` clean.
