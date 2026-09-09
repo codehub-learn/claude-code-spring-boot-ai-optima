@@ -1,11 +1,10 @@
 package gr.codelearn.springbootai.training;
 
+import gr.codelearn.springbootai.training.support.AbstractOracleIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.info.InfoEndpoint;
 import org.springframework.boot.health.actuate.endpoint.HealthEndpoint;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.InstanceOfAssertFactories.map;
@@ -17,9 +16,7 @@ import static org.assertj.core.api.InstanceOfAssertFactories.map;
  * (no running server, no HTTP client). The {@code build}/{@code git} assertions assume a full {@code ./mvnw} build ran first (both goals
  * fire before the {@code test} phase); running only this class from an IDE without that step will not have generated the files.
  */
-@SpringBootTest
-@ActiveProfiles("test")
-class ActuatorEndpointsTest {
+class ActuatorEndpointsTest extends AbstractOracleIntegrationTest {
 	@Autowired
 	private HealthEndpoint healthEndpoint;
 

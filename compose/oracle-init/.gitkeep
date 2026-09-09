@@ -1,0 +1,2 @@
+# Placeholder so the compose bind-mount path exists in a fresh checkout.
+# Drop *.sql / *.sh here to seed the local Oracle on its first boot.

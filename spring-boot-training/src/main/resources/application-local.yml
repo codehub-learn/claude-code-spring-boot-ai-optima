@@ -11,8 +11,11 @@ logging:
       console:
   level:
     gr.codelearn.springbootai.training: DEBUG
-    # Uncomment to see the datasource / SQL once persistence lands in U3:
-    # org.hibernate.SQL: DEBUG
+    # Persistence visibility for local runs (U3). SQL statements, bound parameter values, and Flyway's
+    # migration log. All off in application.yml / test so prod and CI stay quiet.
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    org.flywaydb: DEBUG
 
 management:
   endpoints:

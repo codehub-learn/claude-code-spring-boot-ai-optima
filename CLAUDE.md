@@ -9,8 +9,9 @@ A reference application that showcases the current Spring ecosystem for building
 
 - **Spring Boot 4.1.x** on **Spring Framework 7** (Jakarta EE 11, Jackson 3, JSpecify null-safety).
 - **Spring AI 2.0.x** for chat, embeddings, RAG, tool calling, and vector search.
-- **RDBMS**: PostgreSQL is the default (with `pgvector` as the Spring AI vector store). Oracle is a supported alternative; keep persistence
-  code portable and push vendor specifics into config or migration scripts.
+- **RDBMS**: Oracle Database 23ai (the customer's platform) is the target and the only supported database, with Oracle 23ai AI Vector
+  Search as the Spring AI vector store. Local dev and Testcontainers use the `gvenzl/oracle-free:23-slim` image. Keep persistence code
+  standard JPA / SQL and push vendor specifics into config or migration scripts.
 - **REST APIs** as the primary interface, documented with OpenAPI.
 - **Maven** multi-module reactor (flat `gr.codelearn` groupId), **Java 25** (LTS) toolchain. See *Maven multi-module layout*.
 
@@ -30,9 +31,9 @@ Use the Maven wrapper (`./mvnw`, or `.\mvnw.cmd` on Windows PowerShell).
 | Format check                              | `./mvnw spotless:check`  |
 | Apply format                              | `./mvnw spotless:apply`  |
 
-Local infrastructure (Postgres + pgvector, the `grafana/otel-lgtm` telemetry stack, etc.) runs via Docker Compose; Spring Boot's
-`spring-boot-docker-compose` module wires it automatically in dev. Grafana is at `http://localhost:3000`. Integration tests use
-Testcontainers, so they need a running Docker daemon but no manual setup.
+Local infrastructure (Oracle 23ai Free via `gvenzl/oracle-free:23-slim`, the `grafana/otel-lgtm` telemetry stack, etc.) runs via Docker
+Compose; start it yourself with `docker compose up -d` (the `spring-boot-docker-compose` module is not used). Grafana is at
+`http://localhost:3000`. Integration tests use Testcontainers, so they need a running Docker daemon but no manual setup.
 
 Never mark a task done until `./mvnw verify` and `spotless:check` pass.
 
@@ -79,7 +80,7 @@ Pick these unless there is a concrete reason not to. Flag deviations before impl
 | Logging                          | Native Boot structured logging (`logging.structured.format.console`)                                      | No Logback/Logstash add-on. JSON logs correlated with `traceId`/`spanId`; Loki ingests via OTLP or Grafana Alloy.                                          |
 | Testing                          | JUnit 5, AssertJ, Spring Boot slice tests, Testcontainers, `RestAssured` or `MockMvcTester` for API tests |                                                                                                                                                            |
 | Test data                        | Instancio or hand-built factories                                                                         | Avoid sharing mutable fixtures across tests.                                                                                                               |
-| AI                               | Spring AI 2.0 starters (`spring-ai-starter-model-*`, `spring-ai-starter-vector-store-pgvector`)           | Use `ChatClient`, `Advisor`s, and `@Tool` methods. Keep prompts in `src/main/resources/prompts`.                                                           |
+| AI                               | Spring AI 2.0 starters (`spring-ai-starter-model-*`, `spring-ai-starter-vector-store-oracle`)             | Use `ChatClient`, `Advisor`s, and `@Tool` methods. Keep prompts in `src/main/resources/prompts`.                                                           |
 | Resilience for external/AI calls | Spring Retry + timeouts, Resilience4j if circuit breaking is needed                                       |                                                                                                                                                            |
 
 Do not add a library that overlaps one already listed without discussing it first.
@@ -169,8 +170,8 @@ Rules:
 - Never log full prompts or completions at INFO in non-local profiles; they may contain user data.
 - Keep API keys in environment variables / Spring config, never in code or committed properties. Local dev overrides go in
   `application-local.yml` (git-ignored) or `.env`.
-- Vector store: `pgvector` via the Spring AI starter. Embedding dimension and distance metric are config, set once and migrated
-  deliberately.
+- Vector store: Options include Oracle 23ai AI Vector Search via the Spring AI `spring-ai-starter-vector-store-oracle` starter (same Oracle
+  instance as the RDBMS) or dedicated vector DBs. Embedding dimension and distance metric are config, set once and migrated deliberately.
 
 ## Configuration and profiles
 

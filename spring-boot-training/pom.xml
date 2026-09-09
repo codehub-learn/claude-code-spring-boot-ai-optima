@@ -49,12 +49,37 @@
 			<artifactId>spring-boot-starter-aspectj</artifactId>
 		</dependency>
 
-		<!-- Spring transaction API: only for the @TransactionalEventListener in foundation.components (2.3).
-		     No transaction manager is wired yet, so it stays dormant until U3.1 brings spring-tx transitively
-		     via spring-boot-starter-data-jpa and U3.4 exercises it for real. -->
+		<!-- Persistence (U3): Spring Data JPA over Hibernate 7. Brings HikariCP, spring-orm, spring-jdbc and
+		     spring-tx transitively, plus a real JpaTransactionManager - which is what finally activates the
+		     @TransactionalEventListener wired dormant in foundation.components (2.3). -->
 		<dependency>
-			<groupId>org.springframework</groupId>
-			<artifactId>spring-tx</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+
+		<!-- Oracle JDBC driver (runtime only; the app compiles against JPA, not the driver). ojdbc17 is the
+		     JDK 17+ build - the right one for the Java 25 toolchain and virtual threads. Version comes from
+		     the Spring Boot BOM property oracle-database.version. -->
+		<dependency>
+			<groupId>com.oracle.database.jdbc</groupId>
+			<artifactId>ojdbc17</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Flyway: SQL-first, versioned migrations in src/main/resources/db/migration. Applied manually via the
+		     flyway-maven-plugin (see <build>), NOT on app boot - except under the test profile, where Boot's
+		     FlywayAutoConfiguration runs them against the throwaway Testcontainers database. Boot 4 splits every
+		     integration's auto-configuration into its own module: spring-boot-flyway carries that autoconfig and
+		     pulls flyway-core. Since Flyway 10 the core jar bundles no database dialects, so
+		     flyway-database-oracle is required for Oracle. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-flyway</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-oracle</artifactId>
+			<scope>runtime</scope>
 		</dependency>
 
 		<!-- DevTools: automatic restart + LiveReload while developing. optional=true so it never leaks onto a
@@ -70,6 +95,27 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- Testcontainers: integration tests run against a real Oracle in a throwaway container
+		     (gvenzl/oracle-free). spring-boot-testcontainers adds @ServiceConnection so the container wires
+		     spring.datasource.* with no @DynamicPropertySource boilerplate. Versions come from the
+		     Testcontainers BOM, which the Spring Boot BOM imports; in Testcontainers 2.x the module is
+		     testcontainers-oracle-free. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-oracle-free</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -105,12 +151,58 @@
 				</executions>
 			</plugin>
 
+			<!-- maven-failsafe-plugin: runs *IT classes in the integration-test phase and fails the build in
+			     verify. Version, the integration-test/verify executions and config are inherited from the Boot
+			     parent's pluginManagement; listing it here just switches it on. Surefire still runs *Test. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+			</plugin>
+
 			<!-- git-commit-id-maven-plugin: version + `revision` execution + git.properties config are all inherited
 			     from the Boot parent's pluginManagement; listing it here just switches it on. Writes
 			     target/classes/git.properties, which Actuator's GitInfoContributor surfaces under /actuator/info -> "git" -->
 			<plugin>
 				<groupId>io.github.git-commit-id</groupId>
 				<artifactId>git-commit-id-maven-plugin</artifactId>
+			</plugin>
+
+			<!-- flyway-maven-plugin: migrations are applied manually, never on app boot (spring.flyway.enabled=false
+			     in application.yml; the test profile re-enables Boot's Flyway for its throwaway Testcontainers DB).
+			     With a database running (compose.yaml Oracle, or `docker compose up -d`):
+			       ./mvnw -pl spring-boot-training flyway:migrate     apply pending migrations
+			       ./mvnw -pl spring-boot-training flyway:info         show applied / pending state
+			       ./mvnw -pl spring-boot-training flyway:validate     check scripts against history
+			       ./mvnw -pl spring-boot-training flyway:clean        drop everything (dev only)
+			     No <executions>, so nothing runs during a normal build. Version tracks flyway-core via the Boot
+			     BOM property. Connection defaults match compose.yaml; override with -Dflyway.url / -Dflyway.user /
+			     -Dflyway.password or a flyway.conf. The Oracle JDBC driver and the Flyway Oracle module are plugin
+			     dependencies (plugin dependencies are not covered by the project's BOM); their versions reuse the
+			     Boot BOM properties oracle-database.version / flyway.version. -->
+			<plugin>
+				<groupId>org.flywaydb</groupId>
+				<artifactId>flyway-maven-plugin</artifactId>
+				<version>${flyway.version}</version>
+				<configuration>
+					<url>jdbc:oracle:thin:@//localhost:1521/FREEPDB1</url>
+					<user>training</user>
+					<password>training</password>
+					<locations>
+						<location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
+					</locations>
+				</configuration>
+				<dependencies>
+					<dependency>
+						<groupId>com.oracle.database.jdbc</groupId>
+						<artifactId>ojdbc17</artifactId>
+						<version>${oracle-database.version}</version>
+					</dependency>
+					<dependency>
+						<groupId>org.flywaydb</groupId>
+						<artifactId>flyway-database-oracle</artifactId>
+						<version>${flyway.version}</version>
+					</dependency>
+				</dependencies>
 			</plugin>
 		</plugins>
 	</build>

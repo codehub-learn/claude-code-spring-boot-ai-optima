@@ -1,0 +1,43 @@
+# Local development database. Start it yourself: `docker compose up -d` (stop with `docker compose down`).
+# The app does not manage this stack - application.yml points spring.datasource.* at
+# localhost:1521/FREEPDB1 and assumes it is up. `./mvnw flyway:migrate` targets the same. Integration
+# tests ignore this file and use Testcontainers instead.
+services:
+  oracle:
+    # Oracle Database 23ai Free, "slim" variant: no APEX / sample schemas, so the smallest image and the
+    # fastest first boot. gvenzl's images are the de facto community standard for a disposable local Oracle.
+    image: gvenzl/oracle-free:23-slim
+    environment:
+      # SYS / SYSTEM password. A throwaway local credential, not a secret.
+      ORACLE_PASSWORD: oracle
+      # Auto-creates this application user in the default FREEPDB1 pluggable database and makes it the
+      # current schema. Both variables are required for the user to be created.
+      APP_USER: training
+      APP_USER_PASSWORD: training
+    ports:
+      # host:container - 1521 is the TNS listener; connect with SQLcl / SQL*Plus / a GUI client.
+      - '1521:1521'
+    volumes:
+      # Oracle datafiles on a named volume: the database survives `docker compose down`
+      # (use `docker compose down -v` to wipe it).
+      - oracle-data:/opt/oracle/oradata
+      # First-boot-only init hook: *.sql / *.sql.gz / *.sh here run once, after APP_USER is created.
+      # Empty for now; kept for later seed data or extra grants. (Every-startup scripts would live in
+      # /container-entrypoint-startdb.d.)
+      - ./compose/oracle-init:/container-entrypoint-initdb.d
+    healthcheck:
+      # The gvenzl image ships healthcheck.sh (listener up + database open). Compose and Boot wait on it.
+      test: [ 'CMD', 'healthcheck.sh' ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # First-ever boot creates the database and can take a few minutes; don't fail the container before then.
+      start_period: 120s
+    # Oracle needs far more shared memory than Docker's 64 MB /dev/shm default, or it dies at startup with
+    # ORA-27101 / "MEMORY_TARGET not supported".
+    shm_size: '1g'
+    # Reap zombie processes left by the in-container process supervisor.
+    init: true
+
+volumes:
+  oracle-data:

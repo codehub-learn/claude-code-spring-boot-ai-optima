@@ -1,9 +1,8 @@
 package gr.codelearn.springbootai.training.foundation.components;
 
+import gr.codelearn.springbootai.training.support.AbstractOracleIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -16,9 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Unit 2.3: {@code @Scheduled} fires {@link HeartbeatTask#beat()} on its own (the {@code test} profile shortens the interval to 200 ms),
  * and {@code @Async} runs {@link AsyncGreeter#greetAsync} on the task executor, not the caller thread.
  */
-@SpringBootTest
-@ActiveProfiles("test")
-class SchedulingAndAsyncTest {
+class SchedulingAndAsyncTest extends AbstractOracleIntegrationTest {
 
 	@Autowired
 	private HeartbeatTask heartbeatTask;

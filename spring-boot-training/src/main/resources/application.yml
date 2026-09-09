@@ -6,6 +6,51 @@ spring:
       # Java 21+ virtual threads for request handling and @Async; keeps blocking code cheap under load.
       enabled: true
 
+  # The app assumes Oracle is already running - it does not start one. Bring it up with
+  # `docker compose up -d` (see compose.yaml) or point at any local Oracle. These are the compose.yaml
+  # values - the auto-created APP_USER in the FREEPDB1 pluggable database (a throwaway local credential,
+  # not a secret); override in prod with SPRING_DATASOURCE_URL / SPRING_DATASOURCE_USERNAME /
+  # SPRING_DATASOURCE_PASSWORD or a git-ignored .env. Integration tests ignore these - Testcontainers
+  # @ServiceConnection supplies its own connection details.
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: training
+    password: training
+    hikari:
+      pool-name: training-pool
+      # Small pool: this is a demo, and virtual threads mean a blocked connection wait is cheap. Size a real
+      # pool to the DB's max_connections and the app's actual concurrency, not to request volume.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      # validate: Hibernate checks the mapped entities against the schema Flyway built and fails fast on a
+      # mismatch. Never create/update/create-drop - migrations own the schema (CLAUDE.md).
+      ddl-auto: validate
+    # Close the persistence context at the end of the service call, not the view render. Lazy access from a
+    # controller or serializer then fails loudly instead of issuing surprise queries.
+    open-in-view: false
+    properties:
+      hibernate.format_sql: true
+    # Log SQL through the org.hibernate.SQL logger (see application-local.yml), not System.out.
+    show-sql: false
+
+  flyway:
+    # Migrations are NOT applied on app boot. Run them deliberately with the flyway-maven-plugin:
+    #   ./mvnw -pl spring-boot-training flyway:migrate   (also: flyway:info, flyway:validate, flyway:clean)
+    # against a running database (compose.yaml Oracle, or `docker compose up -d`). The plugin's
+    # connection defaults and script location live in spring-boot-training/pom.xml.
+    # Boot's own Flyway is re-enabled only for tests (application-test.yml), where the schema has to be
+    # built automatically against a throwaway Testcontainers database.
+    enabled: false
+    # Default location; stated so the convention is visible (used when Boot runs Flyway, i.e. tests).
+    locations: classpath:db/migration
+    # This is a greenfield schema - every environment starts from V1, so never baseline.
+    baseline-on-migrate: false
+
 # Shared defaults live here. Profile-specific overrides: application-local.yml (dev), application-test.yml
 # (tests). Secrets and machine-specific values come from the environment or a git-ignored .env, never from
 # a committed file.

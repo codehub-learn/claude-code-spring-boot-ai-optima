@@ -173,9 +173,8 @@ restart on a classpath change and LiveReload while developing. Boot disables it 
 packaged jar and `optional=true` keeps it off any downstream classpath, so it is safe to
 leave declared. `application-test.yml` turns restart off for tests.
 
-**Docker Compose / Postgres** (`spring-boot-docker-compose` + a `compose.yaml` Postgres
-service) is deferred to U3.1, where the first real datasource lands and there is something
-for it to wire.
+**Docker Compose / Oracle** (a `compose.yaml` Oracle service) is deferred to U3.1, where the
+first real datasource lands and there is something for it to wire.
 
 ---
 
@@ -337,4 +336,108 @@ Run it and watch the startup log:
 # MessageProvider beans found by component scan: {StaticMessageComponent=component, GreetingService=service, MessageRepositoryStub=repository}
 # app.name via @Value='...', via Environment='...', via @ConfigurationProperties='...'
 # Heartbeat #1 on '...'
+```
+
+---
+
+## U3 — Data Persistence Layer
+
+### 3.1 Datasource & migrations
+
+The persistence stack lands here: an Oracle datasource on HikariCP, Flyway SQL-first
+migrations, Hibernate in `validate` mode, and a Testcontainers base class for the tests.
+No entities yet — those are 3.2. `V1__create_catalog.sql` creates the `catalog` slice (`category`, `product`); the orders schema follows as
+`V2` with its entities.
+
+**Where the datasource comes from.** The app assumes Oracle is already running — it does
+not start one.
+
+| Context                  | Datasource                                                                                                    |
+|--------------------------|---------------------------------------------------------------------------------------------------------------|
+| `./mvnw spring-boot:run` | `spring.datasource.*` in `application.yml` → `localhost:1521/FREEPDB1` (start it with `docker compose up -d`) |
+| Integration tests        | `AbstractOracleIntegrationTest` — a Testcontainers `@ServiceConnection` container                             |
+| Production               | environment (`SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD`) overrides the committed defaults            |
+
+The committed `url` / `username` / `password` are the `compose.yaml` values (the `training`
+app user in `FREEPDB1`) — a throwaway local credential, not a secret. Everything else in `application.yml` is HikariCP pool tuning
+(`pool-name`, `maximum-pool-size`,
+`minimum-idle`, `connection-timeout`, `max-lifetime`),
+sized deliberately small: this is a demo, and virtual threads make a connection wait cheap.
+Size a real pool to the database's `max_connections` and the app's true concurrency, not to
+request volume.
+
+**Local database (`compose.yaml`).** A convenience, nothing more — bring it up with
+`docker compose up -d`, take it down with `docker compose down`. The app does not manage it (no `spring-boot-docker-compose`), so it must be
+running before `spring-boot:run` or
+`flyway:migrate`. The image is `gvenzl/oracle-free:23-slim` — Oracle Database 23ai Free, slim
+variant (no APEX / sample schemas, smallest image and fastest first boot). `APP_USER` /
+`APP_USER_PASSWORD` auto-create the `training` user in the default `FREEPDB1` pluggable
+database. Oracle-container best practice baked into the service: `shm_size: 1g` (Oracle needs
+far more than Docker's 64 MB `/dev/shm`), the image's own `healthcheck.sh`, a named
+`oracle-data` volume at `/opt/oracle/oradata` so the database survives `down` (`down -v` to
+wipe), and a first-boot init hook at `./compose/oracle-init` → `/container-entrypoint-initdb.d`
+(empty for now). First-ever boot creates the database and takes a few minutes; the healthcheck
+`start_period` allows for it.
+
+**Flyway — manual, not on boot.** SQL migrations live in `src/main/resources/db/migration`,
+named `V<n>__<snake_case>.sql`. `spring.flyway.enabled: false` in `application.yml`, so the
+app never migrates when it starts. Instead the `flyway-maven-plugin` (module `pom.xml`) runs
+them against a running database on demand:
+
+```bash
+docker compose up -d                                  # or let a previous `spring-boot:run` leave it up
+./mvnw -pl spring-boot-training flyway:migrate         # apply pending migrations
+./mvnw -pl spring-boot-training flyway:info            # applied / pending state
+./mvnw -pl spring-boot-training flyway:validate        # scripts vs. history
+./mvnw -pl spring-boot-training flyway:clean           # drop everything (dev only)
+```
+
+The plugin has no lifecycle-bound execution, so a normal build never triggers it. Its
+connection defaults (`jdbc:oracle:thin:@//localhost:1521/FREEPDB1`, `training`/`training`)
+match `compose.yaml`; override with `-Dflyway.url` / `-Dflyway.user` / `-Dflyway.password`
+or a `flyway.conf`. Plugin version tracks `flyway-core` via the Boot BOM; the Oracle JDBC
+driver (`ojdbc17`) and `flyway-database-oracle` (Flyway 10+ ships no DB dialects in core) are
+plugin dependencies, versioned from the BOM properties `oracle-database.version` /
+`flyway.version`.
+
+**Tests are the exception.** `application-test.yml` sets `spring.flyway.enabled: true`. The
+test datasource is a per-run Testcontainers database on a random port, so `mvn
+flyway:migrate` cannot reach it — Boot's `FlywayAutoConfiguration` migrates it on context
+start instead. That autoconfig comes from `org.springframework.boot:spring-boot-flyway`
+(Boot 4 splits each integration's autoconfig into its own module; it pulls `flyway-core`).
+
+`V1` adds `created_at` / `updated_at` / `version` columns up front so the 3.2 entities (JPA
+auditing, `@Version`) map onto them without an `ALTER`.
+
+**`ddl-auto: validate`.** Migrations own the schema; Hibernate only checks the entity
+mappings against it and fails fast on a mismatch. Never `create` / `update` /
+`create-drop`. With no entities yet, `validate` is a no-op. Because migrations no longer run
+on boot, starting the app against an un-migrated database will fail `validate` once 3.2 adds
+entities — that is the intended "did you run `flyway:migrate`?" signal.
+`DatasourceMigrationIT` (test profile, so Flyway ran) asserts `flyway_schema_history`, the
+tables, and the FK all exist.
+
+**`open-in-view: false`.** The persistence context closes at the end of the service call,
+not the view render, so a lazy access from a controller or serializer fails loudly instead
+of firing surprise queries.
+
+**Testcontainers base class.** `AbstractOracleIntegrationTest` (`support/`) starts one
+`gvenzl/oracle-free:23-slim` container per JVM (singleton pattern: a `static` field, started
+in a static initialiser, reaped by Ryuk at exit) and exposes it via `@ServiceConnection`. Every
+`@SpringBootTest` in the module now extends it — a full context needs a real database to
+start once a datasource is on the classpath. The `ApplicationContextRunner` tests (`AppPropertiesTest`, the `foundation.beans` tests)
+don't — they never build a full context.
+`*IT` classes run under Failsafe (`maven-failsafe-plugin`, switched on in the module pom);
+`*Test` classes stay on Surefire.
+
+**Transaction manager.** `spring-boot-starter-data-jpa` finally brings a real
+`JpaTransactionManager`, so the `@TransactionalEventListener` wired dormant in 2.3 is now
+active (still only fires inside an actual transaction — exercised in 3.4).
+
+```bash
+docker compose up -d                                   # Oracle must be up first
+./mvnw -pl spring-boot-training flyway:migrate          # apply migrations (once, or after adding a script)
+./mvnw -pl spring-boot-training spring-boot:run
+# (no Docker Compose or Flyway output at boot)
+# GET /actuator/health -> {"components":{"db":{"status":"UP"}, ...}}
 ```

@@ -1,14 +1,13 @@
 package gr.codelearn.springbootai.training.foundation.components;
 
+import gr.codelearn.springbootai.training.support.AbstractOracleIntegrationTest;
 import org.assertj.core.data.MapEntry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Repository;
 import org.springframework.stereotype.Service;
-import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -16,9 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Unit 2.3: {@code @Component}, {@code @Service} and {@code @Repository} are one scan. The two specializations are meta-annotated
  * {@code @Component}, which is why {@link StereotypeInventory} receives all three in a single injected {@code List<MessageProvider>}.
  */
-@SpringBootTest
-@ActiveProfiles("test")
-class ComponentStereotypeTest {
+class ComponentStereotypeTest extends AbstractOracleIntegrationTest {
 
 	@Autowired
 	private StereotypeInventory inventory;

@@ -108,3 +108,121 @@ Patterns captured after user corrections. Review at session start.
 - `@NullMarked` on a `package-info.java` covers that package only, not sub-packages. Add one
   `@NullMarked package-info.java` per package. `org.jspecify` is already on the compile classpath via
   Spring Framework 7, no explicit dependency needed.
+
+## Boot 4: auto-configuration is split per-integration into its own module
+
+- In Boot 4.x each integration's `*AutoConfiguration` lives in a dedicated
+  `org.springframework.boot:spring-boot-<x>` module (`spring-boot-flyway`, `spring-boot-jpa`,
+  `spring-boot-jdbc`, `spring-boot-liquibase`, ...). Adding the raw upstream library jar (`org.flywaydb:flyway-core`) puts the library on
+  the classpath but **not** its Boot autoconfig —
+  the app starts and silently does nothing (Flyway: no migration, empty schema, no
+  `flyway_schema_history`). Depend on `spring-boot-flyway` (it pulls `flyway-core`) instead. When not
+  using a `spring-boot-starter-*`, check whether a `spring-boot-<x>` autoconfig module exists in the BOM.
+- Flyway 10+ ships no DB dialects in the core jar, so the target database's dialect module is a
+  separate dependency: `org.flywaydb:flyway-database-oracle`.
+
+## Testcontainers 2.0 renamed every module artifact
+
+- Boot 4.1's BOM pins Testcontainers 2.0.x. In 2.0 every module artifactId gained a `testcontainers-`
+  prefix: `org.testcontainers:oracle-free` → `testcontainers-oracle-free`,
+  `junit-jupiter` → `testcontainers-junit-jupiter`, etc. The old names are **not** in the 2.0 BOM, so
+  they fail with "'dependencies.dependency.version' ... is missing". The core jar is still
+  `org.testcontainers:testcontainers`.
+- Package layout mostly stable: the container class is `org.testcontainers.oracle.OracleContainer`
+  (from the `oracle-free` module), `org.testcontainers.utility.DockerImageName` unchanged.
+
+## `spring-boot:run` + a repo-root `compose.yaml` in a multi-module reactor
+
+- (General fact; `spring-boot-training` does not use `spring-boot-docker-compose` — it assumes the
+  database is already up.)
+- `spring-boot-docker-compose` resolves `compose.yaml` against the **working directory**.
+  `./mvnw -pl <module> spring-boot:run` forks in the module directory, so a repo-root `compose.yaml`
+  is not found ("'files' content [compose.yaml] must exist"). Fix: set
+  `<workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>` on the
+  `spring-boot-maven-plugin` in the module pom so the app runs from the reactor root. Prefer this over
+  a brittle `spring.docker.compose.file: ../compose.yaml`.
+
+## Once a datasource is on the classpath, every `@SpringBootTest` needs a database
+
+- Adding `spring-boot-starter-data-jpa` means `DataSourceAutoConfiguration` runs for every full
+  context; `@SpringBootTest` classes that previously needed no DB now fail at startup ("Failed to
+  configure a DataSource"). Give them all a shared Testcontainers base class (`@SpringBootTest @ActiveProfiles("test")` + a singleton
+  `@ServiceConnection` container as a `static`
+  field started in a `static {}` block, no `@Testcontainers`). `ApplicationContextRunner` tests are
+  unaffected — they never build a full context. `@ActiveProfiles` on a subclass merges with the base's (`inheritProfiles=true` by default).
+
+## Flyway migrations are run manually via Maven, not on app boot
+
+- User decision (U3.1 follow-up): `spring.flyway.enabled: false` in `application.yml`. Migrations are
+  applied deliberately with the `flyway-maven-plugin` (in the module `<build><plugins>`, **no**
+  `<executions>` so a normal build never triggers it):
+  `./mvnw -pl spring-boot-training flyway:migrate` (also `flyway:info` / `flyway:validate` /
+  `flyway:clean`), against a DB you started yourself (`docker compose up -d` — the app no longer
+  starts one, see below).
+- Plugin needs its own `<dependencies>` (plugin deps are not covered by the project BOM): the Oracle
+  JDBC driver (`ojdbc17`) + `flyway-database-oracle`, versioned from the inherited BOM properties
+  `${oracle-database.version}` / `${flyway.version}`. Connection config in `<configuration>` (`url` /
+  `user` / `password`), overridable with `-Dflyway.url` etc.
+- **Tests are the exception:** `application-test.yml` sets `spring.flyway.enabled: true`. The test
+  datasource is a per-run Testcontainers container on a random port that `mvn flyway:migrate` can't
+  reach, so Boot's `FlywayAutoConfiguration` migrates it on context start. `spring-boot-flyway`
+  dependency is kept for exactly this.
+- Once entities exist (3.2), booting the app against an un-migrated DB fails `ddl-auto: validate` -
+  that is the intended "run `flyway:migrate` first" signal.
+
+## App does not start its own database
+
+- `spring-boot-docker-compose` is not used, to keep boot fast. The app assumes Oracle is already
+  running. `application.yml` carries explicit `spring.datasource.url/username/password` (= the
+  `compose.yaml` values, a throwaway local credential; prod overrides with `SPRING_DATASOURCE_URL` /
+  `_USERNAME` / `_PASSWORD`). Start the DB with `docker compose up -d` before `spring-boot:run` or
+  `flyway:migrate`.
+- Tests are unaffected: Testcontainers `@ServiceConnection` registers a `JdbcConnectionDetails` bean
+  that takes precedence over the `spring.datasource.*` properties.
+
+## Spotless cache can hide a real formatting violation
+
+- `spotless:check` skips files its cache thinks are clean. A wrapped multi-arg call that IntelliJ
+  tab+space-aligned (`ij_java_align_multiline_parameters_in_calls=true`) can sit "clean" in the cache
+  for months; the moment you edit that file the cache invalidates and `check` fails on the old
+  alignment. `spotless:apply` fixes it to tabs-only — but the open IDE re-breaks it on the next
+  filesystem-change notification, so run `spotless:apply` and then `verify` with nothing touching the
+  files in between (chain them, don't let a tool call land between).
+
+## The database is Oracle Database 23ai
+
+- Local dev + Testcontainers use `gvenzl/oracle-free:23-slim` (Oracle Database 23ai Free). The app
+  connects as the `training` app user to the `FREEPDB1` pluggable database:
+  `jdbc:oracle:thin:@//localhost:1521/FREEPDB1`.
+- Coordinates, all Spring Boot 4.1.1 BOM-managed: driver `com.oracle.database.jdbc:ojdbc17`
+  (property `oracle-database.version`; `ojdbc17` is the JDK 17+ build — the right one for Java 25 +
+  virtual threads); Flyway dialect `org.flywaydb:flyway-database-oracle` (`flyway.version`);
+  Testcontainers module `org.testcontainers:testcontainers-oracle-free` (2.x name), container class
+  `org.testcontainers.oracle.OracleContainer`. Boot's `spring-boot-testcontainers` ships an Oracle
+  `@ServiceConnection` factory.
+
+## Oracle DDL / SQL notes
+
+- Types: `number(19)` for a 64-bit id, `varchar2(n)`, `number(p,s)`, `timestamp with time zone`;
+  `systimestamp` for the current timestamp default.
+- Column clause order: `default <expr>` comes **before** `not null`
+  (`... default systimestamp not null`).
+- `generated always as identity` and `constraint ... check/unique/foreign key` are standard.
+- Unquoted identifiers are folded to **UPPER case** in the data dictionary. Query `user_tables` /
+  `user_constraints` (there is no `information_schema`); FK constraints have `constraint_type = 'R'`.
+- Flyway creates its schema-history table with **quoted, lower-case** identifiers on Oracle, so from
+  SQL you must quote them: `select "success" from "flyway_schema_history" where "version" = '1'`
+  (unquoted `FLYWAY_SCHEMA_HISTORY` → ORA-00942). `"success"` is `NUMBER(1)` — read as int.
+
+## `gvenzl/oracle-free` compose best practice
+
+- `shm_size: '1g'` is not optional — Oracle dies at startup on Docker's 64 MB `/dev/shm` default (ORA-27101 / "MEMORY_TARGET not
+  supported").
+- Healthcheck: the image ships `healthcheck.sh` (`test: ['CMD', 'healthcheck.sh']`). First-ever boot
+  builds the database and takes minutes — set a generous `start_period`.
+- `APP_USER` **and** `APP_USER_PASSWORD` are both required to auto-create the app user (in `FREEPDB1`).
+  `ORACLE_PASSWORD` is SYS/SYSTEM.
+- Datafiles volume: `/opt/oracle/oradata`. First-boot-only init scripts: `/container-entrypoint-initdb.d`
+  (`*.sql` / `*.sql.gz` / `*.sh`); every-startup scripts: `/container-entrypoint-startdb.d`.
+- Image is large (~2 GB) and slow to first-start; cache the container once per JVM via the singleton
+  pattern so `verify` starts Oracle only once.

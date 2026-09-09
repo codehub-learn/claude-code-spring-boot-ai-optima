@@ -42,8 +42,7 @@ separate and out of scope here — no AI code in this wave.
 	  activation example.
 - [x] **1.3 Project setup** — `application.yml` + `application-local.yml` + `application-test.yml`,
   `AppProperties` record (`@ConfigurationProperties("app")` + `@Validated`) with a nested block,
-  native structured JSON console logging config, `spring-boot-docker-compose` wiring to a
-  Postgres + pgvector-less Postgres service in `compose.yaml`, DevTools note.
+  native structured JSON console logging config, a `compose.yaml` Oracle service, DevTools note.
 
 ## U2 — Core Spring Framework Concepts (6h)
 
@@ -63,8 +62,8 @@ separate and out of scope here — no AI code in this wave.
 
 ## U3 — Data Persistence Layer (8h)
 
-- [ ] **3.1 Datasource & migrations** — HikariCP config, Flyway `V1__create_catalog.sql` (+ later
-  versions), `spring.jpa.hibernate.ddl-auto=validate`, Testcontainers Postgres base test class.
+- [x] **3.1 Datasource & migrations** — HikariCP config, Flyway `V1__create_catalog.sql` (+ later
+  versions), `spring.jpa.hibernate.ddl-auto=validate`, Testcontainers Oracle base test class.
 - [ ] **3.2 Spring Data JPA — model & associations** — `Category`, `Product`, `Customer`, `Order`,
   `OrderItem` entities (Lombok `@Getter/@Setter`, `@NoArgsConstructor(PROTECTED)`, business-key
   `equals`/`hashCode`, `@Version`), `@ManyToOne` / `@OneToMany` / `@ManyToMany` join entity,
@@ -178,7 +177,7 @@ separate and out of scope here — no AI code in this wave.
   rest (`target`, `.idea`, `*.log`, ...) was already there. `application-local.yml` stays
   committed by design.
 - `README.md` 1.3 section: config-file table, typed-config rules, structured logging, DevTools,
-  and the explicit Docker-Compose/Postgres deferral to U3.1.
+  and the explicit Docker-Compose/Oracle deferral to U3.1.
 - Verified: `./mvnw verify` → 7 tests green, `spotless:check` clean; ran the built jar and
   confirmed ECS JSON logs on stdout (`@timestamp`, `service.*`, `ecs.version`).
 - Banner version follow-up: `${application.version}` was still blank under `spring-boot:run`
@@ -284,3 +283,62 @@ separate and out of scope here — no AI code in this wave.
   `LoggingBeanPostProcessorTest`) with tab+space continuation indent. `spotless:apply` reverted them
   to tabs-only; the diffs are whitespace-only (`git diff -w` is empty).
 - `./mvnw -pl spring-boot-training verify` → 36 tests green (was 26); `spotless:check` clean.
+
+### 3.1 Datasource & migrations (done)
+
+- Deps (`spring-boot-training/pom.xml`): `spring-boot-starter-data-jpa`, `ojdbc17` (runtime),
+  `spring-boot-flyway` + `flyway-database-oracle`, test: `spring-boot-testcontainers` +
+  `testcontainers-oracle-free` + `testcontainers-junit-jupiter`. `maven-failsafe-plugin` switched on (inherits executions/config from the
+  Boot parent) so `*IT` runs.
+- Boot 4 gotcha: `FlywayAutoConfiguration` lives in the `spring-boot-flyway` *module*, not `flyway-core`.
+  With only the raw `flyway-core` jar the app starts but never migrates (empty schema, no
+  `flyway_schema_history`). Depend on `org.springframework.boot:spring-boot-flyway`. Lessons updated.
+- Testcontainers 2.0 gotcha: every module artifact was renamed with a `testcontainers-` prefix (`org.testcontainers:oracle-free` ->
+  `testcontainers-oracle-free`, `junit-jupiter` ->
+  `testcontainers-junit-jupiter`). The bare names fail with "version is missing" (not in the 2.0 BOM).
+  Container class is `org.testcontainers.oracle.OracleContainer`. Lessons updated.
+- `compose.yaml` at repo root: a `gvenzl/oracle-free:23-slim` service (Oracle Database 23ai Free, slim).
+  Env `ORACLE_PASSWORD` (SYS/SYSTEM) + `APP_USER`/`APP_USER_PASSWORD` = `training`/`training`
+  (auto-created in the `FREEPDB1` PDB). Oracle-container best practice: `shm_size: 1g` (mandatory -
+  ORA-27101 on Docker's 64 MB `/dev/shm`), the image's `healthcheck.sh` with a long `start_period`,
+  named `oracle-data` volume at `/opt/oracle/oradata`, first-boot init hook `./compose/oracle-init` ->
+  `/container-entrypoint-initdb.d` (+ a `.gitkeep`), `init: true`.
+- `application.yml`: `spring.datasource.url` = `jdbc:oracle:thin:@//localhost:1521/FREEPDB1` +
+  `training`/`training` (the `compose.yaml` values, a throwaway local credential; prod overrides with
+  `SPRING_DATASOURCE_*` env). `spring.datasource.hikari.*` pool tuning, `spring.jpa` (`ddl-auto:
+  validate`, `open-in-view: false`, `format_sql`), `spring.flyway` (`enabled: false`, `locations`,
+  `baseline-on-migrate`). Hibernate dialect stays auto-detected. `application-local.yml`:
+  `org.hibernate.SQL` DEBUG / `orm.jdbc.bind` TRACE / `flywaydb` DEBUG. `application-test.yml`:
+  `spring.flyway.enabled: true`, `format_sql: false`.
+- Flyway is manual, not on boot: `spring.flyway.enabled: false` in `application.yml`; a
+  `flyway-maven-plugin` in the module `pom.xml` (no lifecycle execution) runs
+  `./mvnw -pl spring-boot-training flyway:migrate|info|validate|clean` against the running Oracle (plugin deps: `ojdbc17` +
+  `flyway-database-oracle`, versions from the BOM props
+  `${oracle-database.version}` / `${flyway.version}`; connection defaults match `compose.yaml`,
+  override with `-Dflyway.*`). The `test` profile is the exception - `application-test.yml` sets
+  `spring.flyway.enabled: true` so Boot migrates the per-run Testcontainers DB (which the plugin
+  cannot target) on context start; `spring-boot-flyway` is kept for exactly that.
+- `spring-boot-docker-compose` is not used (keeps boot fast) - start the DB yourself with
+  `docker compose up -d` before `spring-boot:run` / `flyway:migrate`. Tests are unaffected:
+  Testcontainers `@ServiceConnection` supplies its own `JdbcConnectionDetails`.
+- `db/migration/V1__create_catalog.sql`: `category` + `product` in Oracle syntax (`number(19)` identity
+  PKs, `varchar2`, `number(12,2)`, `timestamp with time zone default systimestamp`, `default` before
+  `not null`; `uq_`/`fk_`/`ix_`/`ck_` constraints; `created_at`/`updated_at`/`version` columns for the
+  3.2 entities). DDL only.
+- Tests: `support/AbstractOracleIntegrationTest` - `@SpringBootTest @ActiveProfiles("test")` + a
+  singleton `@ServiceConnection OracleContainer` (`gvenzl/oracle-free:23-slim`, static field,
+  `static { start(); }`, no `@Testcontainers`). All 10 `@SpringBootTest` classes `extends` it (a
+  datasource on the classpath means a full context needs a DB); the `ApplicationContextRunner` tests
+  are untouched. `DependencyInjectionLocalProfileTest` keeps `@ActiveProfiles("local")` (merges to
+  `{test, local}`).
+- `persistence/DatasourceMigrationIT` (`extends` the base, `JdbcClient`): asserts the V1 row in
+  `"flyway_schema_history"` (quoted lower-case on Oracle; `"success"` read as int), `CATEGORY`/`PRODUCT`
+  in `user_tables` (unquoted DDL names fold UPPER-case), and `FK_PRODUCT_CATEGORY` in `user_constraints`
+  (`constraint_type = 'R'`).
+- `README.md`: `## U3` + `### 3.1` section. `CLAUDE.md`: RDBMS bullet, local-infra line, AI vector-store
+  row/bullet all name Oracle. Memory + lessons.md updated.
+- IDE-vs-Spotless drift (lessons.md) hit again: the open IDE tab+space-aligns wrapped call args that
+  Spotless wants tabs-only. `spotless:apply` fixes it, but the IDE re-breaks it between `apply` and
+  `check` - run `spotless:apply` then `verify` with nothing touching files in between.
+- `./mvnw -pl spring-boot-training verify` -> BUILD SUCCESS, `spotless:check` clean, Failsafe `*IT` 3/3 (Testcontainers Oracle up in ~24 s,
+  `DatasourceMigrationIT` green against real Oracle).

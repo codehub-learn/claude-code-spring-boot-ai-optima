@@ -1,10 +1,9 @@
 package gr.codelearn.springbootai.training.foundation.components;
 
+import gr.codelearn.springbootai.training.support.AbstractOracleIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
 import java.util.concurrent.TimeUnit;
 
@@ -15,9 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code @Async @EventListener} runs on the task executor, off the publisher's stack. The {@code @TransactionalEventListener} is not
  * exercised here — it needs a transaction manager (U3.4).
  */
-@SpringBootTest
-@ActiveProfiles("test")
-class ApplicationEventsTest {
+class ApplicationEventsTest extends AbstractOracleIntegrationTest {
 
 	@Autowired
 	private GreetingEventPublisher publisher;

@@ -8,6 +8,15 @@ spring:
   devtools:
     restart:
       enabled: false
+  jpa:
+    properties:
+      # Keep test logs terse; SQL formatting is not what these tests assert.
+      hibernate.format_sql: false
+  flyway:
+    # Re-enable Boot-managed Flyway for tests only. The datasource is a per-run Testcontainers
+    # database, so `mvn flyway:migrate` (which targets compose.yaml Oracle) cannot prepare it -
+    # Boot migrates it on context start instead. Production/dev boot keeps Flyway off (application.yml).
+    enabled: true
 
 logging:
   structured:
