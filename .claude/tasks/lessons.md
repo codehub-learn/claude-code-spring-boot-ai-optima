@@ -304,3 +304,52 @@ Patterns captured after user corrections. Review at session start.
 - A Java `record` works as an `@Embeddable` for a plain `@Embedded` field (immutable value object).
   `@Column` / `@AttributeOverride` on the record components map and validate normally. Keeps the
   "records for value objects, Lombok only for entities" rule intact.
+
+## Spring Data JDBC alongside Spring Data JPA — coexist, but scope each scanner (U3.5)
+
+- Adding `spring-boot-starter-data-jdbc` next to `spring-boot-starter-data-jpa` works: Spring Data's **strict multi-store detection**
+  (auto-on with 2+ Spring Data modules) routes each repository by
+  its aggregate — `@org.springframework.data.relational.core.mapping.Table` +
+  `ListCrudRepository`/`CrudRepository` → JDBC; `@jakarta.persistence.Entity` + `JpaRepository` → JPA.
+- **But** each scanner still examines *every* repository interface and logs an INFO line
+  `Could not safely identify store assignment for repository candidate interface …` for the ones it
+  can't claim (verify stays green — it's noise, not a failure, and only visible on `spring-boot:run`,
+  not in the test log). Fix: pin each module to its own package —
+  `@EnableJpaRepositories(basePackages = "…catalog")` and
+  `@EnableJdbcRepositories(basePackages = "…reporting")` in `config/persistence` (`PersistenceConfig`
+	+ a new `JdbcConfig`). `@EnableJpaRepositories` replaces Boot's `JpaRepositoriesAutoConfiguration`;
+	  `@EnableJdbcRepositories` only registers the repo config extension, so Boot still supplies
+	  `JdbcAggregateTemplate` / dialect / converters.
+- The reporting aggregate must import the `org.springframework.data.*` annotations only (`org.springframework.data.annotation.Id`, `org.springframework.data.relational.core.mapping.{Table,
+  Column,MappedCollection}`). A stray `jakarta.persistence.*` import misroutes the repo (or fails
+  mapping). Records work as Spring Data JDBC aggregate roots; a `Set<Child>` with no `@Id` on the
+  child is the "owned collection" case — Spring Data deletes-all-by-FK + re-inserts on every save.
+- `spring.data.jdbc.dialect: oracle` is optional (auto-resolves `JdbcOracleDialect` from ojdbc17
+  metadata) but explicit is cheaper and clearer.
+
+## `JdbcClient` has no batch API in Spring Framework 7.x (U3.5)
+
+- `JdbcClient` (`org.springframework.jdbc.core.simple`) has no batch method — `params(List)` is
+  positional params for **one** statement, `update()` returns one `int`. A real batch drops to
+  `NamedParameterJdbcTemplate.batchUpdate(sql, SqlParameterSource[])`.
+- Build the `SqlParameterSource[]` with `SimplePropertySqlParameterSource` (spring-jdbc 7.x,
+  reads record accessors / property paths). **Not** `SqlParameterSourceUtils.createBatch(list)` —
+  it wraps each element in `BeanPropertySqlParameterSource`, which reads JavaBean getters only and
+  binds **nothing** from a record.
+- Skipping generated-key retrieval (caller supplies the natural key) also sidesteps Oracle's
+  "identity column + JDBC batch" limitation.
+
+## Spring Data JDBC quotes `@Table` / `idColumn` literals — must be UPPER case on Oracle (U3.5)
+
+- Spring Data JDBC renders a `@Table("name")` / `@MappedCollection(idColumn = "name")` /
+  `@Column("name")` **string literal** as a *quoted* identifier, verbatim. Oracle folds unquoted
+  DDL identifiers to upper case, so a quoted lower-case `"report_snapshot"` does not resolve (`ORA-00942` / `ORA-00904`). Write the literals
+  upper case: `@Table("REPORT_SNAPSHOT")`,
+  `idColumn = "SNAPSHOT_ID"`.
+- **Derived** names (record component / class name → naming strategy → column/table) are produced *unquoted* and fold to upper case on their
+  own — no annotation needed, no casing issue. So the
+  rule is only about explicit string literals.
+- `JdbcClient` / `NamedParameterJdbcTemplate` SQL is passed through literally (not quoted), so
+  lower-case `sales_ledger` in a `.sql("select … from sales_ledger …")` is fine — same as the
+  Flyway scripts and the catalog `@Table(name = "category")` under Hibernate. The quoting behaviour
+  is specific to Spring Data JDBC's identifier handling.

@@ -16,6 +16,10 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.orm.jdbc.bind: TRACE
     org.flywaydb: DEBUG
+    # Plain-JDBC statements from the U3.5 reporting slice: JdbcClient / NamedParameterJdbcTemplate and Spring
+    # Data JDBC. The catalog slice logs through org.hibernate.SQL above; these are the non-Hibernate paths.
+    org.springframework.jdbc.core: DEBUG
+    org.springframework.data.jdbc: DEBUG
 
 management:
   endpoints:

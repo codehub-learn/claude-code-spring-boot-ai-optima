@@ -51,6 +51,12 @@ spring:
     # This is a greenfield schema - every environment starts from V1, so never baseline.
     baseline-on-migrate: false
 
+  data:
+    jdbc:
+      # Spring Data JDBC (U3.5 reporting slice). Stated explicitly so it never has to probe JDBC metadata for
+      # the dialect; it would resolve to the same OracleDialect from the ojdbc17 connection anyway.
+      dialect: oracle
+
 # Shared defaults live here. Profile-specific overrides: application-local.yml (dev), application-test.yml
 # (tests). Secrets and machine-specific values come from the environment or a git-ignored .env, never from
 # a committed file.

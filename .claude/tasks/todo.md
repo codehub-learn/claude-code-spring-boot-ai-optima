@@ -74,7 +74,7 @@ separate and out of scope here — no AI code in this wave.
 - [x] **3.4 Transactions** — `@Transactional` on services, propagation (`REQUIRES_NEW`), rollback
   rules / `rollbackFor`, read-only, "no network/AI in a transaction" note, `@Transactional`
   self-invocation pitfall demo.
-- [ ] **3.5 Spring Data JDBC / JdbcClient read-model** — a reporting slice (e.g. sales-per-category
+- [x] **3.5 Spring Data JDBC / JdbcClient read-model** — a reporting slice (e.g. sales-per-category
   view) mapped with `JdbcClient`, one small aggregate with Spring Data JDBC, `JdbcClient` batch
   insert, a written note on JDBC-vs-JPA trade-offs.
 - [ ] **3.6 Persistence testing** — `@DataJpaTest` for repositories, `@Sql` seed scripts,
@@ -518,3 +518,48 @@ profile deleted; docs + lessons corrected.
   33 = +8 (`OrderServiceIT`); `CatalogDomainMappingIT` / `OrderRepositoryIT` / `ProductRepositoryIT`
   / `CatalogSeedIT` / `DatasourceMigrationIT` / `OrdersSeedIT` unchanged. All touched files
   reformatted via the `idea` MCP.
+
+### 3.5 Spring Data JDBC / JdbcClient read-model (done)
+
+- New flat package `gr.codelearn.springbootai.training.reporting` (+ `@NullMarked package-info`),
+  all package-private: `CategorySales` / `SalesLedgerEntry` / `SnapshotView` records,
+  `CategorySalesQuery` (`@Component`, `JdbcClient`), `SalesIngestService` + `SnapshotService`
+  (`@Service @Transactional`), `ReportSnapshot` / `ReportSnapshotLine` (Spring Data JDBC record
+  aggregate), `SalesReportRepository extends ListCrudRepository`.
+- `pom.xml`: added `spring-boot-starter-data-jdbc`. It coexists with `-data-jpa` — Spring Data's
+  strict multi-store detection routes `@relational.Table` + `ListCrudRepository` to JDBC and
+  `@jakarta.persistence.Entity` + `JpaRepository` to JPA. Detection alone works but each scanner
+  still logs a `Could not safely identify store assignment` INFO line per repo it can't claim (4
+  for the catalog repos, seen on `spring-boot:run`), so `config/persistence` scopes each side:
+  `@EnableJpaRepositories(basePackages = "…catalog")` on `PersistenceConfig`, new `JdbcConfig`
+  with `@EnableJdbcRepositories(basePackages = "…reporting")`. Startup is then silent.
+- `application.yml`: `spring.data.jdbc.dialect: oracle` (explicit, skips the metadata probe).
+  `application-local.yml`: `org.springframework.jdbc.core` / `org.springframework.data.jdbc`
+  DEBUG added to the persistence-visibility block.
+- `V3__create_reporting.sql`: `sales_ledger` (fact table — `ledger_ref` natural key, `product_id`
+  soft ref **no FK**, `date`/`number(14,2)`; deliberately **no** `created_at`/`updated_at`/`version`
+  trio — nothing maps it), `report_snapshot` (`captured_at` plain `timestamp`, not `with time
+  zone` — pairs with `LocalDateTime`, dodges the 3.2 auditing trap), `report_snapshot_line`
+  (**no id column** — owned child, unique `(snapshot_id, category_name)`). `R__030_seed_reporting.sql`
+  baseline: 12 `SEED-L-*` ledger rows (2 per category, Jan + Feb 2026) + one `baseline` snapshot
+  with 6 lines, `MERGE` per table on the natural key. No `db/demo` tier (reporting needs no
+  volume; the ingest test generates its own).
+- **JdbcClient has no batch API in Spring Framework 7.x** — `SalesIngestService` uses
+  `NamedParameterJdbcTemplate.batchUpdate` with `SimplePropertySqlParameterSource[]` (record-aware;
+  `SqlParameterSourceUtils.createBatch` uses `BeanPropertySqlParameterSource`, which binds nothing
+  from a record). No generated-key read-back → sidesteps Oracle identity-in-batch. Lesson recorded.
+- **Oracle identifier casing (lesson):** Spring Data JDBC renders a `@Table("…")` / `idColumn`
+  string literal as a *quoted* identifier verbatim; Oracle folds unquoted DDL names to upper case,
+  so `@Table("report_snapshot")` → `"report_snapshot"` → `ORA-00942`. Fixed by writing the
+  literals upper case (`@Table("REPORT_SNAPSHOT")`, `idColumn = "SNAPSHOT_ID"`). Derived
+  names (record component → column) are unquoted and fold fine; `JdbcClient` SQL passes through
+  literally so its lowercase names are fine. Caught by `SnapshotServiceIT` on the first `verify`.
+- Tests: `reporting/CategorySalesQueryIT` (5, `@Transactional`), `reporting/SalesIngestServiceIT`
+  (3, **not** `@Transactional` — batch must commit; `IMP-` rows + `@AfterEach` cleanup),
+  `reporting/SnapshotServiceIT` (3, whole-aggregate round-trip + recapture-in-place + cascade
+  delete), `persistence/ReportingSeedIT` (4, mirrors `CatalogSeedIT`/`OrdersSeedIT`).
+- Docs: `README.md` `### 3.5` (JDBC-vs-JPA table + a paragraph per concept + the casing note +
+  the repo-scoping note).
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 36 unchanged, failsafe
+  48 = +15; all prior `*IT` unchanged. `spring-boot:run` starts clean — no
+  `Could not safely identify store assignment` lines. All touched files reformatted via the `idea` MCP.

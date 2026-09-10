@@ -620,16 +620,16 @@ with no transaction at all.
 `PlaceOrderCommand` record (a command object); output is an `OrderConfirmation` record, never
 the `Order` entity.
 
-| Method | Setting | Point |
-|---|---|---|
-| `placeOrder` | `@Transactional` | baseline read-write tx; saves the graph, publishes `OrderPlacedEvent` |
-| `findOrder` | `readOnly = true` | Hibernate flush mode → `MANUAL`, connection flagged read-only; use it for every query method |
-| `peekStatusAfterLocalEdit` | `readOnly = true` | mutates a loaded entity and returns the new value, but the read-only tx **never flushes** — reload and the row is unchanged. A dirty write here is silently lost, not rejected |
-| `placeOrderAndDeliverReceipt` | `rollbackFor = ReceiptDeliveryException.class` | the default rule **commits** on a checked exception; `rollbackFor` opts in to rollback |
-| `placeOrderToleratingLowStock` | `noRollbackFor = LowStockException.class` | the default rule **rolls back** on a `RuntimeException`; `noRollbackFor` opts out, so the order commits and the exception still propagates |
-| `placeBatchIndependently` | *(none)* — delegates to `REQUIRES_NEW` | each order commits in its own transaction (via `OrderPlacementService`), so one bad order does not undo the ones already placed |
-| `placeBatchAtomically` | `@Transactional` | the contrast: one transaction for the batch, first bad order rolls back the lot |
-| `probeTransactionActive` | `@Transactional` | returns `TransactionSynchronizationManager.isActualTransactionActive()` |
+| Method                         | Setting                                        | Point                                                                                                                                                                          |
+|--------------------------------|------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `placeOrder`                   | `@Transactional`                               | baseline read-write tx; saves the graph, publishes `OrderPlacedEvent`                                                                                                          |
+| `findOrder`                    | `readOnly = true`                              | Hibernate flush mode → `MANUAL`, connection flagged read-only; use it for every query method                                                                                   |
+| `peekStatusAfterLocalEdit`     | `readOnly = true`                              | mutates a loaded entity and returns the new value, but the read-only tx **never flushes** — reload and the row is unchanged. A dirty write here is silently lost, not rejected |
+| `placeOrderAndDeliverReceipt`  | `rollbackFor = ReceiptDeliveryException.class` | the default rule **commits** on a checked exception; `rollbackFor` opts in to rollback                                                                                         |
+| `placeOrderToleratingLowStock` | `noRollbackFor = LowStockException.class`      | the default rule **rolls back** on a `RuntimeException`; `noRollbackFor` opts out, so the order commits and the exception still propagates                                     |
+| `placeBatchIndependently`      | *(none)* — delegates to `REQUIRES_NEW`         | each order commits in its own transaction (via `OrderPlacementService`), so one bad order does not undo the ones already placed                                                |
+| `placeBatchAtomically`         | `@Transactional`                               | the contrast: one transaction for the batch, first bad order rolls back the lot                                                                                                |
+| `probeTransactionActive`       | `@Transactional`                               | returns `TransactionSynchronizationManager.isActualTransactionActive()`                                                                                                        |
 
 **`REQUIRES_NEW` needs a proxy hop.** `OrderPlacementService.placeIndependently` is a separate
 bean, not a method on `OrderService`, on purpose. Propagation only takes effect when the call
@@ -654,3 +654,78 @@ not at all if the transaction rolled back. This is the live `AFTER_COMMIT` demo 
 `@Transactional` (a test-managed tx would mask commit / `REQUIRES_NEW` / rollback semantics);
 it uses `TX-`-prefixed order numbers and deletes them in `@AfterEach`. `./mvnw -pl
 spring-boot-training verify` → surefire 36, failsafe 33 (+8), all green.
+
+### 3.5 Spring Data JDBC / JdbcClient read-model
+
+A **reporting slice** that reads and writes without Hibernate - the other half of the Spring
+persistence story, next to the JPA-heavy `catalog`. New flat package `reporting`, a `V3` schema (`sales_ledger` fact table + a
+`report_snapshot` / `report_snapshot_line` aggregate) and its
+`R__030` baseline seed. No controllers (U4), no `@DataJdbcTest` slice yet (that pattern is 3.6).
+
+`spring-boot-starter-data-jdbc` sits on the classpath alongside `spring-boot-starter-data-jpa`.
+Spring Data's **strict multi-store detection** is what routes each repository by its aggregate -
+`@org.springframework.data.relational...Table` + `ListCrudRepository` goes to JDBC,
+`@jakarta.persistence.Entity` + `JpaRepository` to JPA. The reporting aggregate uses the
+`org.springframework.data.*` annotations only; a stray `jakarta.persistence` import would hand it
+to the wrong module.
+
+Detection alone works, but each scanner still *looks at* every repository interface and logs a
+`Could not safely identify store assignment` INFO line for the ones it can't claim (4 lines for
+the catalog repos). So `config/persistence` pins each module to its own package -
+`@EnableJpaRepositories(basePackages = "…catalog")` on `PersistenceConfig`,
+`@EnableJdbcRepositories(basePackages = "…reporting")` on `JdbcConfig` - which keeps startup
+quiet and makes the split explicit. The Spring Data JDBC infrastructure beans still come from
+Boot; the annotation only registers the repository config extension.
+
+**JDBC vs JPA - what you trade.**
+
+|                            | Spring Data JPA (`catalog`)                                                       | JdbcClient / Spring Data JDBC (`reporting`)                                                  |
+|----------------------------|-----------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| Identity & change tracking | persistence context, dirty checking, automatic flush                              | none - you pass exactly the rows to write                                                    |
+| Lazy loading               | `@ManyToOne(LAZY)`, proxies, `LazyInitializationException`                        | no lazy: an aggregate loads whole, a query returns exactly its columns                       |
+| Aggregate boundary         | soft - you can navigate anywhere from any entity                                  | hard - the root owns its children, cascades delete + re-insert, nothing outside is reachable |
+| SQL                        | generated (JPQL / criteria / derived names); tune with `@EntityGraph`, fetch mode | you write it; no surprises, no portability layer                                             |
+| Mapping safety net         | `ddl-auto=validate` checks entities against the schema at boot                    | none - a column rename is a runtime `ORA-00904`                                              |
+| First-level cache          | yes (repeated `findById` in one tx is free)                                       | no - every call hits the database                                                            |
+| Reach for it when          | a domain you mutate through a rich object graph                                   | a report, a projection, a bulk load, a join no entity models                                 |
+
+**The JdbcClient read.** `CategorySalesQuery` aggregates `sales_ledger ⋈ product ⋈ category`
+into `CategorySales` records. `JdbcClient` is the fluent wrapper Boot auto-configures over
+`JdbcTemplate`: `.sql(text).param("since", date).query(CategorySales.class).list()`. The
+`select` aliases (`category_name`, `units_sold`, …) map onto the record components by relaxed
+name, so an alias with no matching component is an error. `.query(BigDecimal.class).single()`
+is the scalar form; `.optional()` tolerates zero rows but still rejects two.
+
+**The Spring Data JDBC aggregate.** `ReportSnapshot` (record, `@Id`, `@MappedCollection Set<…>
+lines`) freezes one query result. `SalesReportRepository extends ListCrudRepository`; `save`
+writes the root then **replaces every child row**, `findByLabel` returns the root with all
+lines populated (1 query for the root + 1 for the collection). `SnapshotService.capture` is
+idempotent on the label - a repeat call loads the existing snapshot and re-saves it, which is
+where the delete-and-re-insert of children shows.
+
+**The batch insert.** `SalesIngestService.ingest(List<SalesLedgerEntry>)` bulk-loads the fact
+table. `JdbcClient` has **no batch API** in Spring Framework 7.x, so this drops to
+`NamedParameterJdbcTemplate.batchUpdate(sql, SqlParameterSource[])` - one prepared statement,
+one round trip. The array is built with `SimplePropertySqlParameterSource` (record-aware);
+`SqlParameterSourceUtils.createBatch` is **not** - it reads JavaBean getters and binds nothing
+from a record. No generated keys are read back (the caller supplies `ledger_ref`), which also
+sidesteps Oracle's identity-column-in-batch limitation.
+
+**Oracle identifier casing.** Spring Data JDBC renders a `@Table("…")` / `idColumn` string
+literal as a *quoted* identifier verbatim. Oracle folds unquoted DDL names to upper case, so
+those literals are written `@Table("REPORT_SNAPSHOT")` - a quoted `"report_snapshot"` would not
+resolve. Derived names (record component → column) are unquoted and fold on their own.
+`JdbcClient` SQL is passed through literally, so its lowercase `sales_ledger` is fine.
+
+```bash
+docker compose up -d
+./mvnw -pl spring-boot-training flyway:migrate          # V3 + R__030
+./mvnw -pl spring-boot-training spring-boot:run         # no multi-store warnings at startup
+```
+
+**Verification.** `CategorySalesQueryIT` (5), `SalesIngestServiceIT` (3, **not** `@Transactional`
+
+- the batch must commit; `IMP-`-prefixed rows, `@AfterEach` cleanup), `SnapshotServiceIT` (3,
+  whole-aggregate round-trip + recapture + cascade delete), `persistence/ReportingSeedIT` (4,
+  baseline present and each snapshot line == its category's ledger sum). `./mvnw -pl
+spring-boot-training verify` → surefire 36, failsafe 48 (+15), all green.

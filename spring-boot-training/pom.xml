@@ -57,6 +57,16 @@
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
 
+		<!-- Spring Data JDBC (U3.5): the non-JPA persistence option, for the reporting read-model slice. JdbcClient
+		     itself is already on the classpath (spring-jdbc, transitive via -data-jpa); this starter adds Spring
+		     Data JDBC repository support (ListCrudRepository over @Table aggregates). Coexists with -data-jpa:
+		     Spring Data's strict multi-store detection routes @Table aggregates here and @Entity/JpaRepository to
+		     JPA, so no @EnableJdbcRepositories / @EnableJpaRepositories is needed. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jdbc</artifactId>
+		</dependency>
+
 		<!-- Lombok: compile-time only, for the JPA @Entity classes (U3.2) - @Getter/@Setter on the mutable
 		     fields, @NoArgsConstructor(PROTECTED). Records cover everything else (CLAUDE.md "Lombok vs
 		     records"). The parent pom already wires lombok as an annotation-processor path; this adds it to
