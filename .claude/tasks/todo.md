@@ -77,7 +77,7 @@ separate and out of scope here — no AI code in this wave.
 - [x] **3.5 Spring Data JDBC / JdbcClient read-model** — a reporting slice (e.g. sales-per-category
   view) mapped with `JdbcClient`, one small aggregate with Spring Data JDBC, `JdbcClient` batch
   insert, a written note on JDBC-vs-JPA trade-offs.
-- [ ] **3.6 Persistence testing** — `@DataJpaTest` for repositories, `@Sql` seed scripts,
+- [x] **3.6 Persistence testing** — `@DataJpaTest` for repositories, `@Sql` seed scripts,
   `@JdbcTest` for the read-model, a Testcontainers `*IT`, an explicit rollback-verification test.
 
 ## U4 — REST API Development (6h)
@@ -563,3 +563,44 @@ profile deleted; docs + lessons corrected.
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 36 unchanged, failsafe
   48 = +15; all prior `*IT` unchanged. `spring-boot:run` starts clean — no
   `Could not safely identify store assignment` lines. All touched files reformatted via the `idea` MCP.
+
+### 3.6 Persistence testing (done)
+
+- **Boot 4.1 test-slice modules (lessons + memory).** Each slice is its own module and none is
+  pulled by `spring-boot-starter-test` (same as `spring-boot-webmvc-test` in 1.1). Added test deps
+  `spring-boot-data-jpa-test` (`@DataJpaTest`; transitively `spring-boot-jpa-test` =
+  `TestEntityManager`) and `spring-boot-jdbc-test` (`@JdbcTest` + `@AutoConfigureTestDatabase`).
+  The annotation packages moved too: `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`,
+  `org.springframework.boot.jdbc.test.autoconfigure.{JdbcTest,AutoConfigureTestDatabase}`,
+  `org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`.
+- **Both slices still run Flyway.** `@DataJpaTest` / `@JdbcTest` → `@AutoConfigureJdbc` →
+  `@AutoConfigureDataSourceInitialization`, and `spring-boot-flyway` contributes
+  `FlywayAutoConfiguration` to that slice import. So with `@ActiveProfiles("test")`
+  (`spring.flyway.enabled: true`) + `@AutoConfigureTestDatabase(replace = NONE)` a slice context
+  migrates the container the same way `@SpringBootTest` does — no embedded DB on the classpath, so
+  `replace = NONE` is mandatory.
+- **Shared container.** Extracted `support/SharedOracleContainer` (singleton `OracleContainer`,
+  started in a `static {}` block). `AbstractOracleIntegrationTest` now references it instead of
+  owning it; new `support/AbstractOraclePersistenceSliceTest` (`@ActiveProfiles("test")` +
+  `@AutoConfigureTestDatabase(replace = NONE)` + `@ServiceConnection` on the shared instance) is the
+  slice base. One Oracle for the whole JVM even though the two bases build different contexts.
+- **`catalog/ProductRepositoryDataJpaTest`** (`@DataJpaTest`, surefire, 4): slice narrowness (`OrderService` bean absent, repos present),
+  derived query vs the `R__010` baseline,
+  `TestEntityManager.persistFlushFind` + auditing/`@Version` populated, `@Sql("/sql/extra-laptop.sql")`
+  fixture. A slice does not load user `@Configuration`, so a nested `@TestConfiguration @EnableJpaAuditing`
+  puts auditing back (importing the package-private `PersistenceConfig` would mean making it public).
+- **`reporting/CategorySalesQueryJdbcTest`** (`@JdbcTest`, surefire, 3): `JdbcClient` present /
+  `EntityManagerFactory` absent, aggregates the `R__030` seed, `@Sql("/sql/extra-storage-ledger.sql")`
+  feeds the aggregate. `CategorySalesQuery` is a `@Component` not a repo, so `@Import(CategorySalesQuery.class)`.
+- **`persistence/PersistenceRollbackIT`** (`@SpringBootTest`, failsafe, 2): explicit rollback
+  verification driving `TestTransaction` by hand (insert → `flagForRollback` + `end` → prove gone in a
+  fresh tx); plus `@Sql` bracketing a non-transactional method (`BEFORE` commits, `AFTER_TEST_METHOD`
+  cleans up — declarative `@AfterEach`).
+- **`@Sql` fixtures** live in `src/test/resources/sql/` — deliberately not `db/migration` (Flyway would
+  run them). 4 files.
+- Docs: `README.md` `### 3.6`. `lessons.md`: the slice-module split + the "slices still run Flyway via
+  `@AutoConfigureDataSourceInitialization`" note. Memory `boot4-modularized-test-packages` updated.
+- No `pom.xml` change beyond the 2 test deps; no migration / seed / prod-code change.
+- `./mvnw -pl spring-boot-training clean verify` → BUILD SUCCESS: surefire 43 = +7 (`ProductRepositoryDataJpaTest` 4,
+  `CategorySalesQueryJdbcTest` 3), failsafe 50 = +2 (`PersistenceRollbackIT`); all prior tests unchanged. All touched files reformatted via
+  the `idea` MCP.

@@ -58,6 +58,33 @@ Patterns captured after user corrections. Review at session start.
 - Use `spring-boot-starter-webmvc`, not `spring-boot-starter-web` (the 4.1 POM marks the latter
   deprecated). Recorded in CLAUDE.md tech-stack table and `maven-scaffold` v1.1.1.
 
+## Boot 4.1 test slices are separate modules, not in spring-boot-starter-test (U3.6)
+
+- Every test slice moved to its own module and its own package, and `spring-boot-starter-test` pulls **none** of them (same as
+  `spring-boot-webmvc-test`). For persistence:
+	- `@DataJpaTest` → `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`, artifact
+	  `spring-boot-data-jpa-test` (test scope). It transitively pulls `spring-boot-jpa-test`, which is
+	  where `TestEntityManager` now lives: `org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`.
+	- `@JdbcTest` + `@AutoConfigureTestDatabase` → `org.springframework.boot.jdbc.test.autoconfigure.*`,
+	  artifact `spring-boot-jdbc-test` (test scope).
+	- `@DataJdbcTest` → `spring-boot-data-jdbc-test` (exists, not used yet).
+- **Slices still run Flyway.** `@DataJpaTest` and `@JdbcTest` are meta-annotated `@AutoConfigureJdbc`,
+  which pulls `@AutoConfigureDataSourceInitialization`; `spring-boot-flyway` ships a
+  `META-INF/spring/…AutoConfigureDataSourceInitialization.imports` adding `FlywayAutoConfiguration`.
+  So with `@ActiveProfiles("test")` (`spring.flyway.enabled: true`) the slice context migrates the
+  DB. There is **no embedded database** on the classpath, so `@AutoConfigureTestDatabase(replace = NONE)`
+  is mandatory on every slice or it fails trying to swap one in.
+- `ddl-auto` is not forced to `create-drop` by the slice when `replace = NONE` + a non-embedded
+  datasource; `application.yml`'s `ddl-auto: validate` still wins (and is what you want against Flyway).
+- A slice does **not** load user `@Configuration`. If the entities need `@EnableJpaAuditing`
+  (`AbstractAuditableEntity` here), add a nested `@TestConfiguration @EnableJpaAuditing` to the test —
+  don't make the package-private production `PersistenceConfig` public just to `@Import` it.
+- `@Sql` fixture scripts go in `src/test/resources/sql/` (or anywhere **not** `db/migration` — Flyway
+  scans `classpath:db/migration` under the test profile and would run them as repeatables).
+- Share one Testcontainers `OracleContainer` across `@SpringBootTest` and the slices: a plain holder
+  class with a `static` field + `static {}` start, referenced by both base classes. Two bases build
+  different contexts but must not start two Oracles.
+
 ## Boot 4 AOP starter renamed; spring-tx not on the classpath by default
 
 - There is **no `spring-boot-starter-aop` in the Boot 4.1 BOM** — adding it fails with

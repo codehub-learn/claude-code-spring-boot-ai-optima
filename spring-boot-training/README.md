@@ -729,3 +729,55 @@ docker compose up -d
   whole-aggregate round-trip + recapture + cascade delete), `persistence/ReportingSeedIT` (4,
   baseline present and each snapshot line == its category's ledger sum). `./mvnw -pl
 spring-boot-training verify` → surefire 36, failsafe 48 (+15), all green.
+
+### 3.6 Persistence testing
+
+The three ways to test persistence code, cheapest first: a **JPA slice** (`@DataJpaTest`), a **JDBC slice** (`@JdbcTest`), and a full **
+`@SpringBootTest` `*IT`** for the things a slice can't
+reach.
+
+**Boot 4.1 packaging.** Every test slice is its own module now, and none rides in on
+`spring-boot-starter-test` (same as `spring-boot-webmvc-test`): add `spring-boot-data-jpa-test`
+for `@DataJpaTest` (it transitively pulls `spring-boot-jpa-test` = `TestEntityManager`, at
+`org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`) and `spring-boot-jdbc-test`
+for `@JdbcTest` + `@AutoConfigureTestDatabase`. The annotations themselves moved too -
+`org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`,
+`org.springframework.boot.jdbc.test.autoconfigure.JdbcTest`.
+
+**Slices against real Oracle.** A slice replaces the datasource with an embedded database by
+default; there is none on the classpath and the point is to test against Oracle, so every slice
+gets `@AutoConfigureTestDatabase(replace = NONE)` and reuses the shared Testcontainers
+`OracleContainer` (`support/SharedOracleContainer` - one container for the whole JVM, referenced
+by both the `@SpringBootTest` base and the slice base). `@ActiveProfiles("test")` keeps
+Boot-managed Flyway on: both slices import `FlywayAutoConfiguration` (via `@AutoConfigureJdbc` →
+`@AutoConfigureDataSourceInitialization`), so the slice context migrates the schema + `R__0*`
+baseline seed exactly like the full-context path.
+
+**`@DataJpaTest` (`ProductRepositoryDataJpaTest`).** Loads Hibernate, the `catalog` repositories,
+`TestEntityManager`, an `@Transactional` wrapper that rolls every method back - and nothing else
+(`context.getBeanNamesForType(OrderService.class)` is empty). A slice does not load user
+`@Configuration`, so `PersistenceConfig`'s `@EnableJpaAuditing` is gone and the `NOT NULL`
+`created_at` / `updated_at` columns would fail on flush; a nested `@TestConfiguration
+@EnableJpaAuditing` puts just that back (importing the package-private `PersistenceConfig` would
+mean making it public for a test).
+
+**`@JdbcTest` (`CategorySalesQueryJdbcTest`).** `DataSource` + `JdbcClient` +
+`DataSourceTransactionManager` + rollback, no JPA (`EntityManagerFactory` bean absent). The
+read-model query object is a `@Component`, not a repository, so it is not slice-scanned:
+`@Import(CategorySalesQuery.class)` brings it in and it aggregates the `R__030` ledger seed.
+
+**`@Sql` seed scripts.** `src/test/resources/sql/*.sql` (**not** `db/migration` - Flyway would
+pick those up). Inside a transactional slice `@Sql` runs in the test's transaction and rolls back
+with it (`extra-laptop.sql` adds a 5th Laptop the repo then sees; `extra-storage-ledger.sql`
+feeds two March rows into the aggregate). On a non-transactional `*IT` method `@Sql` commits, so
+a paired `@Sql(executionPhase = AFTER_TEST_METHOD)` script is the declarative form of an
+`@AfterEach` cleanup (`PersistenceRollbackIT`).
+
+**Explicit rollback verification (`PersistenceRollbackIT`).** Rather than trusting that an
+`@Transactional` test rolls back, it drives `TestTransaction` by hand: insert a row, see it
+inside the transaction, `TestTransaction.flagForRollback()` + `.end()`, then prove in a fresh
+transaction that the row is gone.
+
+**Verification.** `ProductRepositoryDataJpaTest` (4, surefire), `CategorySalesQueryJdbcTest` (3,
+surefire), `persistence/PersistenceRollbackIT` (2, failsafe). `./mvnw -pl spring-boot-training
+verify` → surefire 43 (+7), failsafe 50 (+2), all green.

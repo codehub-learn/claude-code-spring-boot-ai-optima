@@ -139,6 +139,24 @@
 			<artifactId>testcontainers-junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
+
+		<!-- Persistence test slices (U3.6). Boot 4.1 splits every test slice into its own module and
+		     none is pulled by spring-boot-starter-test (same story as spring-boot-webmvc-test):
+		       * spring-boot-data-jpa-test -> @DataJpaTest (transitively spring-boot-jpa-test = TestEntityManager)
+		       * spring-boot-jdbc-test     -> @JdbcTest + @AutoConfigureTestDatabase
+		     Both slices still run Flyway (@AutoConfigureJdbc -> @AutoConfigureDataSourceInitialization,
+		     which spring-boot-flyway contributes FlywayAutoConfiguration to), so with replace=NONE they
+		     migrate the Testcontainers Oracle the same way @SpringBootTest does. Versions from the Boot BOM. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-data-jpa-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-jdbc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
