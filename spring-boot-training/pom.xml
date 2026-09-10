@@ -17,6 +17,15 @@
 	<name>[${project.artifactId}]</name>
 	<description>Spring Boot fundamentals training module: project setup, DI and beans, persistence, and REST APIs</description>
 
+	<!-- Properties/Variables -->
+	<properties>
+		<!-- Flyway script locations for the flyway-maven-plugin (it reads this as its `locations` parameter, so
+		     the plugin <configuration> below carries no <locations> of its own). Default: the DDL plus the
+		     R__0* baseline seed, both under db/migration. The `demo` profile appends src/main/resources/db/demo
+		     so `flyway:migrate -Pdemo` also loads the large generated dataset against a local Oracle. -->
+		<flyway.locations>filesystem:${project.basedir}/src/main/resources/db/migration</flyway.locations>
+	</properties>
+
 	<!-- Dependencies -->
 	<dependencies>
 		<!-- Starters are curated dependency aggregates. They carry no <version>: the reactor parent
@@ -170,10 +179,14 @@
 			<!-- flyway-maven-plugin: migrations are applied manually, never on app boot (spring.flyway.enabled=false
 			     in application.yml; the test profile re-enables Boot's Flyway for its throwaway Testcontainers DB).
 			     With a database running (compose.yaml Oracle, or `docker compose up -d`):
-			       ./mvnw -pl spring-boot-training flyway:migrate     apply pending migrations
-			       ./mvnw -pl spring-boot-training flyway:info         show applied / pending state
-			       ./mvnw -pl spring-boot-training flyway:validate     check scripts against history
-			       ./mvnw -pl spring-boot-training flyway:clean        drop everything (dev only)
+			       ./mvnw -pl spring-boot-training flyway:migrate            apply pending migrations
+			       ./mvnw -pl spring-boot-training flyway:migrate -Pdemo     + the large generated demo dataset
+			       ./mvnw -pl spring-boot-training flyway:info               show applied / pending state
+			       ./mvnw -pl spring-boot-training flyway:validate           check scripts against history
+			       ./mvnw -pl spring-boot-training flyway:clean              drop everything (dev only)
+			     Data seeding is two-tier: the R__0* baseline seeds (db/migration) run everywhere, including the
+			     test profile; the R__9* demo bulk (db/demo) is loaded only by `-Pdemo` (the `demo` profile below
+			     appends db/demo to ${flyway.locations}). `flyway:clean flyway:migrate` returns to baseline.
 			     No <executions>, so nothing runs during a normal build. Version tracks flyway-core via the Boot
 			     BOM property. Connection defaults match compose.yaml; override with -Dflyway.url / -Dflyway.user /
 			     -Dflyway.password or a flyway.conf. The Oracle JDBC driver and the Flyway Oracle module are plugin
@@ -187,9 +200,8 @@
 					<url>jdbc:oracle:thin:@//localhost:1521/FREEPDB1</url>
 					<user>training</user>
 					<password>training</password>
-					<locations>
-						<location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
-					</locations>
+					<!-- locations come from the ${flyway.locations} property (see <properties>); the `demo`
+					     profile overrides it to add db/demo -->
 				</configuration>
 				<dependencies>
 					<dependency>
@@ -207,10 +219,11 @@
 		</plugins>
 	</build>
 
-	<!-- Profiles: two activation styles side by side. `local` is active unless another profile is
-	     explicitly selected (activeByDefault is disabled the moment you pass -P<other>); `ci` activates
-	     on its own whenever the CI environment variable is present. Each only sets the Spring profile
-	     that `spring-boot:run` starts with. -->
+	<!-- Profiles: `local` is active unless another profile is explicitly selected (activeByDefault is
+	     disabled the moment you pass -P<other>); `ci` activates on its own whenever the CI environment
+	     variable is present. Both only set the Spring profile that `spring-boot:run` starts with. `demo`
+	     is opt-in (-Pdemo) and unrelated to the runtime profile: it widens ${flyway.locations} so
+	     `flyway:migrate` also applies the large generated dataset in src/main/resources/db/demo. -->
 	<profiles>
 		<profile>
 			<id>local</id>
@@ -230,6 +243,14 @@
 			</activation>
 			<properties>
 				<spring-boot.run.profiles>test</spring-boot.run.profiles>
+			</properties>
+		</profile>
+		<profile>
+			<id>demo</id>
+			<properties>
+				<flyway.locations>
+					filesystem:${project.basedir}/src/main/resources/db/migration,filesystem:${project.basedir}/src/main/resources/db/demo
+				</flyway.locations>
 			</properties>
 		</profile>
 	</profiles>

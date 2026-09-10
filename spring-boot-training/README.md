@@ -400,6 +400,38 @@ driver (`ojdbc17`) and `flyway-database-oracle` (Flyway 10+ ships no DB dialects
 plugin dependencies, versioned from the BOM properties `oracle-database.version` /
 `flyway.version`.
 
+**Sample data — baseline vs demo.** Seeding is two-tier, and both tiers are plain SQL that
+Flyway owns (no `ddl-auto`, no `data.sql`, no seeder bean):
+
+| Tier          | Location                 | Loaded by                                                               | Size                                            |
+|---------------|--------------------------|-------------------------------------------------------------------------|-------------------------------------------------|
+| Baseline seed | `db/migration/R__0*.sql` | everyone — `flyway:migrate` **and** the `test` profile (Testcontainers) | tiny: 6 categories, 24 products (orders in 3.2) |
+| Demo bulk     | `db/demo/R__9*.sql`      | local Oracle only, opt-in via `-Pdemo`                                  | ~500 generated products                         |
+
+The seeds are **repeatable** migrations (`R__`), not versioned: Flyway re-applies one whenever
+its checksum changes, so you edit the seed in the same commit as the `V*` DDL that motivated it
+and never juggle version numbers or `flyway:clean`. Each script is idempotent — the baseline
+uses one `MERGE` per table keyed on the natural key (`category.name`, `product.sku`); the demo
+bulk owns every `GEN-%` SKU, deletes them, and regenerates them with a seeded `DBMS_RANDOM` so
+prices reproduce. Repeatable migrations run after all versioned ones, in description order (`R__010_…` before `R__020_…`).
+
+```bash
+./mvnw -pl spring-boot-training flyway:migrate                  # schema + baseline seed
+./mvnw -pl spring-boot-training flyway:migrate -Pdemo           # + ~500 generated products
+./mvnw -pl spring-boot-training -Dflyway.cleanDisabled=false flyway:clean flyway:migrate   # back to baseline only
+```
+
+`-Pdemo` widens the `flyway.locations` property (module `pom.xml`) to add `db/demo`. After a
+`-Pdemo` run a plain `flyway:migrate` logs `R__910` as a *missing repeatable* — a warning, not
+a failure. `flyway:clean` is disabled by default (Flyway 10+); pass
+`-Dflyway.cleanDisabled=false` to drop and rebuild. Integration tests that assert on exact contents
+still add their own fixture with `@Sql` (`src/test/resources`, per 3.6) and check their own
+marked rows, not global counts. `CatalogSeedIT` verifies the baseline is present and that no
+`GEN-%` rows leak into the test database.
+
+**Adding an entity later:** ship its `V*` DDL and extend the matching `R__0*` baseline seed in
+the same pass; only add `db/demo` bulk rows when a feature needs volume for a demo.
+
 **Tests are the exception.** `application-test.yml` sets `spring.flyway.enabled: true`. The
 test datasource is a per-run Testcontainers database on a random port, so `mvn
 flyway:migrate` cannot reach it — Boot's `FlywayAutoConfiguration` migrates it on context

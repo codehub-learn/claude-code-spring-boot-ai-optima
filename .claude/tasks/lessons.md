@@ -214,6 +214,42 @@ Patterns captured after user corrections. Review at session start.
   SQL you must quote them: `select "success" from "flyway_schema_history" where "version" = '1'`
   (unquoted `FLYWAY_SCHEMA_HISTORY` → ORA-00942). `"success"` is `NUMBER(1)` — read as int.
 
+## Sample data: two-tier, Flyway-owned, repeatable
+
+- User decision (U3.1 follow-up): seed data is **Flyway**, not `data.sql` / an `ApplicationRunner`
+  seeder. Two tiers:
+	- **Baseline** `db/migration/R__0*_seed_<feature>.sql` - small, idempotent, keyed on natural
+	  keys with `MERGE`. In `db/migration`, so the `test` profile's Boot Flyway applies it after the
+	  DDL and every `@SpringBootTest` starts from it. Pair one with each `V*` entity DDL in the same
+	  commit.
+	- **Demo bulk** `db/demo/R__9*_demo_<feature>.sql` - large, generated with Oracle
+	  `CONNECT BY LEVEL <= N` + `DBMS_RANDOM`. Opt-in only (`-Pdemo`); never in tests.
+- **Repeatable (`R__`), not versioned.** They re-run on checksum change, so the seed evolves with
+  the entities without version-number juggling or `flyway:clean`. Numeric prefix in the
+  description (`R__010_…`, `R__020_…`) controls their order (they run after all `V*`, alphabetically
+  by description).
+- **Idempotency patterns.** Baseline: `MERGE INTO t USING (SELECT … FROM dual UNION ALL …) src ON
+  (t.<natkey> = src.<natkey>) WHEN MATCHED THEN UPDATE … WHEN NOT MATCHED THEN INSERT …`. Bulk: own
+  a marker (`sku LIKE 'GEN-%'`), `DELETE` it, re-`INSERT`. Seed `DBMS_RANDOM` in a
+  `begin dbms_random.seed(n); end;` PL/SQL block terminated by `/` on its own line (Flyway's Oracle
+  parser needs the `/`) for reproducible values.
+- **Don't assume contiguous identity ids** when mapping generated rows to parent rows - use
+  `row_number() over (order by id)` over the parent table, not `min(id) + mod(...)`.
+- **flyway-maven-plugin location switching.** The plugin's `locations` param is
+  `@Parameter(property = "flyway.locations")`. Drop `<locations>` from `<configuration>`, define a
+  `<flyway.locations>` project property as the default, and let a Maven profile (`demo`) override
+  that property to append a directory. Cleaner than trying to merge plugin `<configuration>` lists
+  across profiles.
+- Tests that assert on **exact** rows still use `@Sql` with their own fixture and check their own
+  marked rows - never global counts against the shared baseline.
+- **Never edit an applied `V*` migration**, not even a comment - it changes the checksum and
+  `flyway:migrate` then fails validation on any DB that already ran it ("Migration checksum
+  mismatch for migration version N"). The compose Oracle keeps its schema across sessions (named
+  `oracle-data` volume), so this bites locally even when tests (fresh Testcontainers) stay green.
+  Put pairing notes in the `R__` file / docs, not in the `V*`.
+- `flyway:clean` is **disabled by default** in Flyway 10+ (`flyway.cleanDisabled=true`). Run it as
+  `./mvnw -pl spring-boot-training -Dflyway.cleanDisabled=false flyway:clean flyway:migrate`.
+
 ## `gvenzl/oracle-free` compose best practice
 
 - `shm_size: '1g'` is not optional — Oracle dies at startup on Docker's 64 MB `/dev/shm` default (ORA-27101 / "MEMORY_TARGET not

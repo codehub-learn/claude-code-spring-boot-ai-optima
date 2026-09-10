@@ -342,3 +342,39 @@ separate and out of scope here — no AI code in this wave.
   `check` - run `spotless:apply` then `verify` with nothing touching files in between.
 - `./mvnw -pl spring-boot-training verify` -> BUILD SUCCESS, `spotless:check` clean, Failsafe `*IT` 3/3 (Testcontainers Oracle up in ~24 s,
   `DatasourceMigrationIT` green against real Oracle).
+
+### 3.1 - sample data seeding (follow-up, done)
+
+Not a new checklist item (per `lessons.md`, the user owns the checklist). A follow-up to 3.1: the
+schema existed but no data was loaded. Plan: `.claude/plans/graceful-hugging-wilkes.md`. User
+decisions - two-tier data, repeatable (`R__`) seeds, pure-SQL bulk generation.
+
+- **Two-tier, Flyway-owned, SQL-first.** Baseline seed `db/migration/R__010_seed_catalog.sql`
+  (repeatable): one `MERGE` per table on the natural key (`category.name`, `product.sku`), 6
+  categories + 24 products, identity `id` never inserted, `created_at`/`updated_at`/`version` left
+  to DDL defaults. Lives in `db/migration`, so the `test` profile's Boot-managed Flyway applies it
+  right after `V1` - every `@SpringBootTest` now starts from these rows.
+- **Demo bulk** `db/demo/R__910_demo_catalog.sql` (repeatable): a `begin dbms_random.seed(4242); end; /`
+  block then `delete ... where sku like 'GEN-%'` + `insert ... select ... connect by level <= 500`,
+  categories assigned by `row_number()` so it does not assume contiguous ids. Opt-in only.
+- **Maven wiring.** New `${flyway.locations}` property in `spring-boot-training/pom.xml` (default =
+  `db/migration`); the flyway-maven-plugin `<configuration>` drops its hard-coded `<locations>` and
+  reads the property. New `demo` profile overrides the property to append `db/demo`. So
+  `./mvnw -pl spring-boot-training flyway:migrate -Pdemo` loads baseline + ~500 generated products;
+  plain `flyway:migrate` loads baseline only; `-Dflyway.cleanDisabled=false flyway:clean flyway:migrate`
+  resets to baseline (Flyway 10+ disables `clean` by default).
+- **Test.** `persistence/CatalogSeedIT` (`extends AbstractOracleIntegrationTest`, `JdbcClient`):
+  baseline counts >= 6 / >= 24, no orphan `category_id`, zero `GEN-%` rows in the test DB.
+  `DatasourceMigrationIT` unaffected (its queries filter by `"version" = '1'`).
+- **Docs.** `README.md` 3.1 gains a "Sample data - baseline vs demo" subsection (tier table +
+  commands + the "extend the `R__0*` seed when you add a `V*` DDL" rule). `CLAUDE.md`: a seeding
+  bullet under *Working agreement* + a pointer on the *Schema migrations* table row. `lessons.md` +
+  auto-memory updated.
+- **Deferred to 3.2** (needs the `V2` orders tables + entities): `R__020_seed_orders.sql` baseline
+  and `db/demo/R__920_demo_orders.sql` bulk, following this same convention.
+- Verified: `./mvnw -pl spring-boot-training verify` green (surefire 39, failsafe 6/6 - `CatalogSeedIT`
+  3/3 new, `DatasourceMigrationIT` 3/3 unchanged), `spotless:check` clean. Manual round-trip against
+  compose Oracle: baseline = 6 categories / 24 products / 0 orphans; `-Pdemo` = 524 products (500 `GEN-%`); clean + migrate back to 24.
+- Reverted a one-line comment added to `V1__create_catalog.sql` - editing an applied versioned
+  migration tripped Flyway checksum validation on an already-migrated DB. The R__/V pairing note
+  lives in `R__010`'s header and the docs instead. (Lesson: never touch an applied `V*` file.)
