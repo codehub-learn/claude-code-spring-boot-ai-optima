@@ -505,7 +505,7 @@ profile deleted; docs + lessons corrected.
   concrete answer to the "no network / AI inside a transaction" bullet — the side effect runs
   once the order is durably committed. `GreetingEventListener`'s stale "no transaction manager
   in this module yet" Javadoc updated to point here.
-- Tests: `catalog/OrderServiceIT` (8), `extends AbstractOracleIntegrationTest`, **not**
+- Tests: `order.internal/OrderTransactionSemanticsIT` (8), `extends AbstractOracleIntegrationTest`, **not**
   `@Transactional` (a test-managed tx would mask commit / `REQUIRES_NEW` / rollback). `TX-`
   prefixed order numbers, `@AfterEach` deletes them via `JdbcClient`; `@BeforeEach` resets the
   listener counter. Baseline `R__010` products / `R__020` customers reused.
@@ -515,7 +515,7 @@ profile deleted; docs + lessons corrected.
   with `spring-boot-starter-data-jpa` in 3.1). No `lessons.md` entry — no correction occurred;
   the proxy-visibility and read-only-flush behaviours are captured in the Javadoc + README.
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 36 unchanged, failsafe
-  33 = +8 (`OrderServiceIT`); `CatalogDomainMappingIT` / `OrderRepositoryIT` / `ProductRepositoryIT`
+  33 = +8 (`OrderTransactionSemanticsIT`); `CatalogDomainMappingIT` / `OrderRepositoryIT` / `ProductRepositoryIT`
   / `CatalogSeedIT` / `DatasourceMigrationIT` / `OrdersSeedIT` unchanged. All touched files
   reformatted via the `idea` MCP.
 
@@ -649,10 +649,59 @@ profile deleted; docs + lessons corrected.
   slice — it needs `AppProperties`; its behaviour is covered by the IT). `catalog/CatalogApiIT` (4)
 	+ `catalog/OrderApiIT` (2) `extends AbstractOracleIntegrationTest` + `@AutoConfigureMockMvc` —
 	  real context + Oracle + Flyway seed; page-size clamp asserted; `API-`-prefixed rows cleaned in
-	  `@AfterEach` (not `@Transactional`, `OrderServiceIT` precedent).
+	  `@AfterEach` (not `@Transactional`, `OrderTransactionSemanticsIT` precedent).
 - Docs: `README.md` `## U4` + `### 4.1` (endpoint table + all the notes above). `lessons.md`:
   springdoc version alignment, `spring-boot-webmvc-test`, `PagedModel`-not-`PageImpl`. Memory
   `boot4-modularized-test-packages` extended with the `@WebMvcTest` package.
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 54 = +11 (`CatalogControllerTest` 6, `OrderControllerTest` 5), failsafe
   56 = +6 (`CatalogApiIT` 4,
   `OrderApiIT` 2); all prior tests unchanged. All touched files reformatted via the `idea` MCP.
+
+### Refactor — package split: `catalog` / `order` / `common` (done)
+
+Not a curriculum unit — a follow-up to 4.1. The single `catalog` package had grown past 40 files
+across two bounded contexts. Plan: `~/.claude/plans/robust-sniffing-waterfall.md`.
+
+- **User decision:** split into sibling feature modules `catalog` and `order`, each shaped like a
+  Spring Modulith module (public `*Service` at the module root, everything else in hidden
+  sub-packages `domain/ dto/ mapper/ web/ internal/`) — *without* the `spring-modulith` dependency,
+  a `verify()` test, or the `OrderItem → Product` snapshot change. Considered but rejected: keep one
+  package and layer deeper; nested `product/` + `order/` sub-features; full Modulith.
+- New `common/` package (the shared kernel CLAUDE.md names): `AbstractAuditableEntity` (was
+  `catalog.domain`) and `NotFoundException` (renamed from `CatalogNotFoundException`, was
+  `catalog.internal`). `isNew()` → `protected`.
+- `Address` → `order.domain` (both embedders are order-side). `CatalogDuplicateException` stays
+  `catalog.internal`.
+- `order` keeps one documented, one-way dependency on `catalog.domain`: `OrderItem` `@ManyToOne
+  Product`, `OrderFactory` reads `ProductRepository` to price a line. `catalog` never imports
+  `order` (verified: no `training.order` import under `catalog/`).
+- Config: `PersistenceConfig` `@EnableJpaRepositories(basePackages = { …catalog, …order })`.
+- Fixed in passing: `ProductRepository.priceView()` JPQL constructor expression still pointed at the
+  old `…catalog.ProductPriceView` FQN (would fail Hibernate startup validation); removed two illegal
+  javadoc imports of package-private types (`CatalogController`, `OrderNotifications`) added to the
+  services in an earlier working-tree edit.
+- Tests moved to mirror: `CatalogDomainMappingIT` → `order.domain` as `DomainGraphMappingIT`;
+  `OrderRepositoryIT` → `order.domain`; `OrderTransactionSemanticsIT` → `order.internal` (keeps package-private
+  `OrderNotifications` autowire); `OrderControllerTest` / `OrderApiIT` → `order.web`.
+- 12 new `package-info.java`; the 6 catalog ones rewritten for catalog-only scope.
+- Docs: `README.md` gets a "Follow-up (refactor)" subsection under 4.1 + the `@EnableJpaRepositories`
+  and `CatalogNotFoundException` → `NotFoundException` references corrected.
+- Pure move — no behaviour change. `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS, all
+  110 tests unchanged and green. All touched files reformatted via the `idea` MCP. Remaining `idea`
+  inspection noise (unresolved cross-package `{@link}` in small record/exception javadocs; "cannot
+  resolve table" with no IDE datasource) is pre-existing codebase style, not introduced here.
+
+**Addendum 1 — DDD split of `domain/` (later reverted).** Briefly split each feature into
+`domain/` (entities) + `repository/` (repos, specs, projections). Then abandoned — see Addendum 2.
+
+**Addendum 2 — flattened to CLAUDE.md layout (final, user decision).** The `domain/` / `repository/`
+/ `web/` sub-packages were collapsed back to the feature root. Reason the user landed here: Java
+package access is not hierarchical, so any layered split forces nearly every type `public` and
+makes `internal/` a convention with no teeth; a genuine "root = API, rest hidden" boundary needs
+Spring Modulith, which we're not adding yet. Final shape per feature = CLAUDE.md's skeleton exactly:
+`*Controller`, `*Service`, `*Repository`(ies), entities, `ProductSpecifications`, projections all at
+the feature root; only `dto/`, `mapper/`, `internal/` as sub-packages. `CatalogController` /
+`OrderController`, `OrderNotifications` and the three projections are genuinely package-private
+again. `common/` and the two-feature split stand. Tests flattened to match (`OrderTransactionSemanticsIT` stays
+in `order.internal` — it autowires package-private `OrderNotifications`). `@EnableJpaRepositories`
+unchanged. `./mvnw -pl spring-boot-training verify` green. README follow-up subsection rewritten.

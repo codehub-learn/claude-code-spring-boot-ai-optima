@@ -650,7 +650,7 @@ payment, AI summary; a logged stub here) runs only after the order is durably co
 not at all if the transaction rolled back. This is the live `AFTER_COMMIT` demo the
 `foundation.components` unit (2.3) left dormant.
 
-**Verification.** `OrderServiceIT` (8 tests) runs against real Oracle and is **not**
+**Verification.** `OrderTransactionSemanticsIT` (8 tests) runs against real Oracle and is **not**
 `@Transactional` (a test-managed tx would mask commit / `REQUIRES_NEW` / rollback semantics);
 it uses `TX-`-prefixed order numbers and deletes them in `@AfterEach`. `./mvnw -pl
 spring-boot-training verify` → surefire 36, failsafe 33 (+8), all green.
@@ -672,9 +672,10 @@ to the wrong module.
 Detection alone works, but each scanner still *looks at* every repository interface and logs a
 `Could not safely identify store assignment` INFO line for the ones it can't claim (4 lines for
 the catalog repos). So `config/persistence` pins each module to its own package -
-`@EnableJpaRepositories(basePackages = "…catalog")` on `PersistenceConfig`,
+`@EnableJpaRepositories(basePackages = { "…catalog", "…order" })` on `PersistenceConfig`,
 `@EnableJdbcRepositories(basePackages = "…reporting")` on `JdbcConfig` - which keeps startup
-quiet and makes the split explicit. The Spring Data JDBC infrastructure beans still come from
+quiet and makes the split explicit. (`…catalog` was one package until the U4.1 follow-up split it
+into sibling `catalog` / `order` modules - see below.) The Spring Data JDBC infrastructure beans still come from
 Boot; the annotation only registers the repository config extension.
 
 **JDBC vs JPA - what you trade.**
@@ -830,7 +831,7 @@ unstable JSON contract and Spring Data logs a warning.
 only message converter on the classpath, so an `Accept: application/xml` request is answered
 `406 Not Acceptable` by MVC, no controller code involved.
 
-**Error mapping is a U4.1 stopgap.** `CatalogNotFoundException` carries `@ResponseStatus(NOT_FOUND)`
+**Error mapping is a U4.1 stopgap.** `NotFoundException` carries `@ResponseStatus(NOT_FOUND)`
 and `CatalogDuplicateException` `@ResponseStatus(CONFLICT)` so the failure paths work and are
 testable now. U4.2 removes both annotations and routes the exceptions through a central
 `@RestControllerAdvice` as RFC 9457 `ProblemDetail`.
@@ -858,3 +859,32 @@ curl -i -H 'Accept: application/xml' localhost:8080/api/v1/products/LAP-0001   #
 `spring-boot-webmvc-test` is a new test dependency — Boot 4.1 keeps `@WebMvcTest` /
 `@AutoConfigureMockMvc` out of `spring-boot-starter-test`. `./mvnw -pl spring-boot-training verify`
 → surefire 54 (+11), failsafe 56 (+6), all green.
+
+#### Follow-up (refactor) — sibling `catalog` / `order` / `common` features
+
+By U4.1 the single `catalog` package held ~40 files across two bounded contexts. It was split
+into two sibling feature packages plus a shared kernel, **package-by-feature, flat** (CLAUDE.md):
+the controller, service, repositories, entities, specifications and projections all sit at each
+feature's package root, with only `dto/`, `mapper/` and `internal/` as sub-packages.
+
+- **`catalog`** — `CatalogService`, `CatalogController`, `Product`, `Category`, the repositories,
+  `ProductSpecifications`, `ProductSummary`, `ProductPriceView` at the root; `dto/`, `mapper/`,
+  `internal/` (just `CatalogDuplicateException`).
+- **`order`** — `OrderService`, `OrderController`, the `Order` aggregate (`Order`, `OrderItem`),
+  `Customer`, `Address`, `OrderStatus`, the repositories, `OrderStatusSummary` at the root; `dto/`,
+  `mapper/`, `internal/` (`OrderFactory`, `OrderPlacementService`, `OrderNotifications`, the
+  command/result/event records, the transaction-demo exceptions).
+- **`common`** — the shared kernel: `AbstractAuditableEntity` (`@MappedSuperclass` for both) and
+  `NotFoundException` (was `CatalogNotFoundException`).
+
+**Why flat, not layered sub-packages.** Java package access is not hierarchical — a sub-package
+cannot see a package-private sibling of its parent, so any layered split (`domain/`, `repository/`,
+`web/`, …) forces almost every type to be `public` and turns `internal/` into a naming convention
+with no enforcement. Flat keeps `CatalogController` / `OrderController`, `OrderNotifications` and
+the projections genuinely package-private. Real boundary enforcement would need Spring Modulith
+(a `verify()` test) — deferred.
+
+`order` keeps one documented, one-way dependency on `catalog`: `OrderItem` holds a
+`@ManyToOne Product` and `OrderFactory` reads `ProductRepository` to price a line at order time.
+`PersistenceConfig`'s `@EnableJpaRepositories` now lists both feature packages. Pure move — no
+behaviour change; the `CatalogDomainMappingIT` graph test moved to `order` as `DomainGraphMappingIT`.

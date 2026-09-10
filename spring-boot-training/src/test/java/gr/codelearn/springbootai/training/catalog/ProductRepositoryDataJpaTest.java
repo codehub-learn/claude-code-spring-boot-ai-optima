@@ -1,5 +1,8 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.order.OrderService;
+import gr.codelearn.springbootai.training.order.OrderRepository;
+
 import gr.codelearn.springbootai.training.support.AbstractOraclePersistenceSliceTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

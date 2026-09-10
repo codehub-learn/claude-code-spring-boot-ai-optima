@@ -12,7 +12,7 @@ import java.util.Optional;
  * <p>The interface is package-private: nothing outside {@code catalog} touches it yet (services arrive in 3.4). Spring Data still creates
  * the proxy.
  */
-interface CategoryRepository extends JpaRepository<Category, Long> {
+public interface CategoryRepository extends JpaRepository<Category, Long> {
 
 	/**
 	 * Derived query on the {@code name} business key — {@code where name = ?1}.

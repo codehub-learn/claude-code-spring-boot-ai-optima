@@ -1,5 +1,15 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.catalog.dto.CategoryResponse;
+import gr.codelearn.springbootai.training.catalog.dto.CreateCategoryRequest;
+import gr.codelearn.springbootai.training.catalog.dto.CreateProductRequest;
+import gr.codelearn.springbootai.training.catalog.dto.ProductFilter;
+import gr.codelearn.springbootai.training.catalog.dto.ProductResponse;
+import gr.codelearn.springbootai.training.catalog.dto.UpdateProductRequest;
+import gr.codelearn.springbootai.training.catalog.internal.CatalogDuplicateException;
+import gr.codelearn.springbootai.training.catalog.mapper.CatalogWebMapper;
+import gr.codelearn.springbootai.training.common.NotFoundException;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -10,7 +20,7 @@ import java.util.List;
 
 /**
  * Use-case orchestration for the product and category resources (U4.1). {@code @Transactional} lives here, never on
- * {@link CatalogController}; reads are {@code readOnly = true}. The service returns {@code *Response} records only — {@link Product} and
+ * {@code CatalogController}; reads are {@code readOnly = true}. The service returns {@code *Response} records only — {@link Product} and
  * {@link Category} entities never leave it (CLAUDE.md), and the mapping runs inside the transaction while the LAZY {@code category}
  * association is still reachable.
  *
@@ -18,7 +28,7 @@ import java.util.List;
  * Bean Validation at the controller boundary.
  */
 @Service
-class CatalogService {
+public class CatalogService {
 
 	private final ProductRepository productRepository;
 	private final CategoryRepository categoryRepository;
@@ -32,7 +42,7 @@ class CatalogService {
 	}
 
 	@Transactional(readOnly = true)
-	Page<ProductResponse> findProducts(final ProductFilter filter, final Pageable pageable) {
+	public Page<ProductResponse> findProducts(final ProductFilter filter, final Pageable pageable) {
 		Category category = null;
 		if (filter.category() != null && !filter.category().isBlank()) {
 			category = categoryRepository.findByName(filter.category()).orElse(null);
@@ -49,26 +59,26 @@ class CatalogService {
 	}
 
 	@Transactional(readOnly = true)
-	ProductResponse getProduct(final String sku) {
+	public ProductResponse getProduct(final String sku) {
 		return productRepository.findBySku(sku)
 								.map(mapper::toResponse)
-								.orElseThrow(() -> new CatalogNotFoundException("No product with sku " + sku));
+								.orElseThrow(() -> new NotFoundException("No product with sku " + sku));
 	}
 
 	@Transactional(readOnly = true)
-	List<CategoryResponse> listCategories() {
+	public List<CategoryResponse> listCategories() {
 		return categoryRepository.findAll().stream().map(mapper::toResponse).toList();
 	}
 
 	@Transactional(readOnly = true)
-	CategoryResponse getCategory(final String name) {
+	public CategoryResponse getCategory(final String name) {
 		return categoryRepository.findByName(name)
 								 .map(mapper::toResponse)
-								 .orElseThrow(() -> new CatalogNotFoundException("No category named " + name));
+								 .orElseThrow(() -> new NotFoundException("No category named " + name));
 	}
 
 	@Transactional
-	ProductResponse createProduct(final CreateProductRequest request) {
+	public ProductResponse createProduct(final CreateProductRequest request) {
 		if (productRepository.existsBySku(request.sku())) {
 			throw new CatalogDuplicateException("A product with sku " + request.sku() + " already exists");
 		}
@@ -79,9 +89,9 @@ class CatalogService {
 	}
 
 	@Transactional
-	ProductResponse replaceProduct(final String sku, final UpdateProductRequest request) {
+	public ProductResponse replaceProduct(final String sku, final UpdateProductRequest request) {
 		final Product product = productRepository.findBySku(sku)
-												 .orElseThrow(() -> new CatalogNotFoundException("No product with sku " + sku));
+												 .orElseThrow(() -> new NotFoundException("No product with sku " + sku));
 		product.setName(request.name());
 		product.setDescription(request.description());
 		product.setPrice(request.price());
@@ -90,14 +100,14 @@ class CatalogService {
 	}
 
 	@Transactional
-	void deleteProduct(final String sku) {
+	public void deleteProduct(final String sku) {
 		final Product product = productRepository.findBySku(sku)
-												 .orElseThrow(() -> new CatalogNotFoundException("No product with sku " + sku));
+												 .orElseThrow(() -> new NotFoundException("No product with sku " + sku));
 		productRepository.delete(product);
 	}
 
 	@Transactional
-	CategoryResponse createCategory(final CreateCategoryRequest request) {
+	public CategoryResponse createCategory(final CreateCategoryRequest request) {
 		if (categoryRepository.existsByName(request.name())) {
 			throw new CatalogDuplicateException("A category named " + request.name() + " already exists");
 		}
@@ -106,6 +116,6 @@ class CatalogService {
 
 	private Category requireCategory(final String name) {
 		return categoryRepository.findByName(name)
-								 .orElseThrow(() -> new CatalogNotFoundException("No category named " + name));
+								 .orElseThrow(() -> new NotFoundException("No category named " + name));
 	}
 }

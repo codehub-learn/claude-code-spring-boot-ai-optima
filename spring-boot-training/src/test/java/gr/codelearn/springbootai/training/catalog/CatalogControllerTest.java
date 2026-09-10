@@ -1,5 +1,8 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.catalog.dto.ProductResponse;
+import gr.codelearn.springbootai.training.common.NotFoundException;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -23,8 +26,8 @@ import static org.mockito.Mockito.verify;
 
 /**
  * U4.1 slice test for {@link CatalogController}: MVC infrastructure only, {@link CatalogService} mocked. Verifies status codes, the
- * {@code Location} header, JSON body shape, the {@code 404} failure path (mapped by {@code @ResponseStatus} on
- * {@link CatalogNotFoundException}), and {@code 406} content negotiation.
+ * {@code Location} header, JSON body shape, the {@code 404} failure path (mapped by {@code @ResponseStatus} on {@link NotFoundException}),
+ * and {@code 406} content negotiation.
  *
  * <p>{@code config.web.WebConfig} is a {@link WebMvcConfigurer} and would otherwise be pulled into the slice; it needs
  * {@code AppProperties} which the slice does not bind, so it is filtered out. Its behaviour (CORS, page-size clamp) is covered by
@@ -63,7 +66,7 @@ class CatalogControllerTest {
 
 	@Test
 	void getUnknownProductReturns404() {
-		given(catalogService.getProduct("NOPE")).willThrow(new CatalogNotFoundException("No product with sku NOPE"));
+		given(catalogService.getProduct("NOPE")).willThrow(new NotFoundException("No product with sku NOPE"));
 
 		assertThat(mvc.get().uri("/api/v1/products/{sku}", "NOPE")).hasStatus(HttpStatus.NOT_FOUND);
 	}

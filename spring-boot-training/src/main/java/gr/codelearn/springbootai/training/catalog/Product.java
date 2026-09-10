@@ -1,5 +1,7 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.common.AbstractAuditableEntity;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -26,7 +28,7 @@ import java.util.Objects;
 @Entity
 @Table(name = "product")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-class Product extends AbstractAuditableEntity {
+public class Product extends AbstractAuditableEntity {
 
 	@Setter
 	@Column(nullable = false)
@@ -48,7 +50,7 @@ class Product extends AbstractAuditableEntity {
 	@JoinColumn(name = "category_id", nullable = false)
 	private Category category;
 
-	Product(final String sku, final String name, final BigDecimal price, final Category category) {
+	public Product(final String sku, final String name, final BigDecimal price, final Category category) {
 		this.sku = sku;
 		this.name = name;
 		this.price = price;

@@ -1,5 +1,12 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.catalog.dto.CategoryResponse;
+import gr.codelearn.springbootai.training.catalog.dto.CreateCategoryRequest;
+import gr.codelearn.springbootai.training.catalog.dto.CreateProductRequest;
+import gr.codelearn.springbootai.training.catalog.dto.ProductFilter;
+import gr.codelearn.springbootai.training.catalog.dto.ProductResponse;
+import gr.codelearn.springbootai.training.catalog.dto.UpdateProductRequest;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;

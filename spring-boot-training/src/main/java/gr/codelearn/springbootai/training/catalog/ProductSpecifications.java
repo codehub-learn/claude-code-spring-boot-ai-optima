@@ -15,7 +15,7 @@ import java.util.Locale;
  * <p>An absent argument yields {@link Specification#unrestricted()} (a no-op predicate) rather than {@code null}, so composition never has
  * to null-check. This keeps the dynamic-query logic here, out of the repository and out of the caller.
  */
-final class ProductSpecifications {
+public final class ProductSpecifications {
 
 	private ProductSpecifications() {
 	}
@@ -23,7 +23,7 @@ final class ProductSpecifications {
 	/**
 	 * {@code lower(name) like %fragment%}, or a no-op when {@code fragment} is null/blank.
 	 */
-	static Specification<Product> nameContains(final @Nullable String fragment) {
+	public static Specification<Product> nameContains(final @Nullable String fragment) {
 		if (fragment == null || fragment.isBlank()) {
 			return Specification.unrestricted();
 		}
@@ -34,7 +34,7 @@ final class ProductSpecifications {
 	/**
 	 * {@code price >= min}, or a no-op when {@code min} is null.
 	 */
-	static Specification<Product> priceAtLeast(final @Nullable BigDecimal min) {
+	public static Specification<Product> priceAtLeast(final @Nullable BigDecimal min) {
 		if (min == null) {
 			return Specification.unrestricted();
 		}
@@ -44,7 +44,7 @@ final class ProductSpecifications {
 	/**
 	 * {@code price <= max}, or a no-op when {@code max} is null.
 	 */
-	static Specification<Product> priceAtMost(final @Nullable BigDecimal max) {
+	public static Specification<Product> priceAtMost(final @Nullable BigDecimal max) {
 		if (max == null) {
 			return Specification.unrestricted();
 		}
@@ -54,7 +54,7 @@ final class ProductSpecifications {
 	/**
 	 * {@code category = ?}, or a no-op when {@code category} is null. Uses an equality predicate on the {@code @ManyToOne}, not a join.
 	 */
-	static Specification<Product> inCategory(final @Nullable Category category) {
+	public static Specification<Product> inCategory(final @Nullable Category category) {
 		if (category == null) {
 			return Specification.unrestricted();
 		}

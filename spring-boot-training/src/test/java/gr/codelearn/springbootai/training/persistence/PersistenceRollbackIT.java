@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li><b>{@code @Sql} bracketing a non-transactional test.</b> {@link #sqlScriptsBracketANonTransactionalTest()}
  *       has no test transaction, so {@code @Sql} commits its fixture before the method and a second
  *       {@code AFTER_TEST_METHOD} script cleans up after - the declarative form of an {@code @AfterEach} teardown,
- *       the pattern {@code OrderServiceIT} / {@code SalesIngestServiceIT} do by hand.</li>
+ *       the pattern {@code OrderTransactionSemanticsIT} / {@code SalesIngestServiceIT} do by hand.</li>
  * </ul>
  */
 class PersistenceRollbackIT extends AbstractOracleIntegrationTest {

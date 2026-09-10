@@ -25,7 +25,7 @@ import java.util.Optional;
  *   <li><b>projections</b> — interface ({@link ProductSummary}), record ({@link ProductPriceView}) and dynamic ({@code Class<T>}).</li>
  * </ul>
  */
-interface ProductRepository extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product> {
+public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product> {
 
 	// ---- derived queries -------------------------------------------------------------------------------------------------------------
 

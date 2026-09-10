@@ -1,25 +1,22 @@
 /**
- * Unit 3.2 — the Catalog &amp; Orders domain model: the JPA entities, their associations, the {@link Address} embeddable and the
- * {@link OrderStatus} enum. The wider curriculum treats this as a single vertical slice that carries units 3 and 4 (persistence and REST);
- * repositories, queries and services follow in 3.3+.
+ * The <b>catalog</b> feature — products and their categories: browse, filter, and CRUD over {@code /api/v1/products} and
+ * {@code /api/v1/categories}. Carries units 3 (persistence) and 4 (REST) for this half of the domain; the ordering half lives in the
+ * sibling {@code order} feature.
  *
- * <p>What lives here:
+ * <p>Package-by-feature, flat (CLAUDE.md): the controller, service, repositories, entities, {@code ProductSpecifications} and the query
+ * projections all sit at this package root. Only three sub-packages:
  * <ul>
- *   <li>{@link AbstractAuditableEntity} — a {@code @MappedSuperclass} giving every entity an identity
- *       primary key, {@code @Version} optimistic locking and {@code @CreatedDate}/{@code @LastModifiedDate}
- *       auditing (activated by {@code config.persistence.PersistenceConfig});</li>
- *   <li>{@link Category} 1&#8211;&lt; {@link Product} — {@code @ManyToOne} plus the inverse
- *       {@code @OneToMany};</li>
- *   <li>{@link Customer} 1&#8211;&lt; {@link Order} 1&#8211;&lt; {@link OrderItem} &gt;&#8211;1
- *       {@link Product} — {@code Order}/{@code Product} is a many-to-many resolved through the
- *       {@code OrderItem} join entity, which carries {@code quantity} and {@code unitPrice};</li>
- *   <li>{@link Address} — an {@code @Embeddable} value object embedded twice ({@code Customer} billing,
- *       {@code Order} shipping) with {@code @AttributeOverrides}.</li>
+ *   <li>{@code dto} — the REST request/response records (public wire contract);</li>
+ *   <li>{@code mapper} — hand-written entity&#8596;DTO mapping (MapStruct in U4.4);</li>
+ *   <li>{@code internal} — feature-private detail (currently just {@code CatalogDuplicateException}).</li>
  * </ul>
  *
- * <p>Entities are the one place Lombok is allowed (CLAUDE.md): {@code @Getter}/{@code @Setter} on the
- * mutable fields and a protected no-args constructor; {@code equals}/{@code hashCode} are hand-written
- * against the business key, never the generated id.
+ * <p>{@code CatalogController} is package-private (only Spring and its slice test reference it). The projections
+ * ({@code ProductSummary}, {@code ProductPriceView}) are package-private too. Everything a sub-package or another feature must reach —
+ * {@code CatalogService}, the repositories, {@code Product}, {@code Category} — is {@code public}: Java package access is not hierarchical,
+ * so a sub-package cannot see a package-private sibling of its parent. Cross-feature access goes through {@code CatalogService}
+ * (CLAUDE.md); the one exception is {@code order}, which references {@code Product} / {@code ProductRepository} directly to price an order
+ * line. Depends on {@code common} only; never on {@code order}.
  */
 @NullMarked
 package gr.codelearn.springbootai.training.catalog;

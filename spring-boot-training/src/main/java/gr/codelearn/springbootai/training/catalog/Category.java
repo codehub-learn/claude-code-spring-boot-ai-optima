@@ -1,5 +1,7 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.common.AbstractAuditableEntity;
+
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -27,7 +29,7 @@ import java.util.Set;
 @Entity
 @Table(name = "category")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-class Category extends AbstractAuditableEntity {
+public class Category extends AbstractAuditableEntity {
 
 	@Column(nullable = false, unique = true)
 	private String name;
@@ -39,7 +41,7 @@ class Category extends AbstractAuditableEntity {
 	@OneToMany(mappedBy = "category", cascade = {CascadeType.PERSIST, CascadeType.MERGE})
 	private final Set<Product> products = new LinkedHashSet<>();
 
-	Category(final String name, final @Nullable String description) {
+	public Category(final String name, final @Nullable String description) {
 		this.name = name;
 		this.description = description;
 	}
@@ -48,7 +50,7 @@ class Category extends AbstractAuditableEntity {
 	 * Adds a product and fixes the owning side of the association in the same call, so an in-memory graph stays consistent without a
 	 * reload. The inverse collection is otherwise read-only; {@link Product#setCategory(Category)} is what actually moves the foreign key.
 	 */
-	void addProduct(final Product product) {
+	public void addProduct(final Product product) {
 		products.add(product);
 		product.setCategory(this);
 	}
