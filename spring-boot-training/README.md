@@ -478,3 +478,75 @@ docker compose up -d                                   # Oracle must be up first
 # (no Docker Compose or Flyway output at boot)
 # GET /actuator/health -> {"components":{"db":{"status":"UP"}, ...}}
 ```
+
+### 3.2 Spring Data JPA — model & associations
+
+The domain object model for the Catalog & Orders slice — five entities in one flat
+`catalog` package, plus `V2__create_orders.sql` and the paired orders seed. Repositories and
+queries are 3.3; services and transactions are 3.4. No controllers yet.
+
+```
+Category 1 ──< Product           Product.category  @ManyToOne  ·  Category.products  @OneToMany (inverse)
+Customer 1 ──< Order             Order.customer    @ManyToOne
+Order    1 ──< OrderItem >──1 Product              @OneToMany(cascade = ALL, orphanRemoval = true)  +  @ManyToOne
+                                 → Order ↔ Product is many-to-many, resolved through the OrderItem join entity
+Address  @Embeddable             Customer.billingAddress  ·  Order.shippingAddress (@AttributeOverrides → ship_*)
+OrderStatus  enum                Order.status  @Enumerated(STRING)  + ck_order_status check constraint
+```
+
+**One `@MappedSuperclass` for the boilerplate.** `AbstractAuditableEntity` gives every entity
+the four columns that `V1`/`V2` put on every table:
+
+| Field                     | Mapping                                              | Notes                                                                                       |
+|---------------------------|------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| `id`                      | `@Id @GeneratedValue(IDENTITY)`                      | Oracle `generated always as identity`. Identity keys disable Hibernate insert batching.     |
+| `version`                 | `@Version` `Long`                                    | 0 on insert, +1 on every dirtying flush; stale value on update → `OptimisticLockException`. |
+| `createdAt` / `updatedAt` | `@CreatedDate` / `@LastModifiedDate`, type `Instant` | Spring Data JPA auditing (`@EnableJpaAuditing` in `config/persistence/PersistenceConfig`).  |
+
+Auditing needs `@EnableJpaAuditing` present or the listener never runs. The timestamp type is **`Instant`, not `OffsetDateTime`** — Spring
+Data's auditing converter supports
+`LocalDateTime` / `Instant` / `Date` / `Long` only. `@JdbcTypeCode(TIMESTAMP_WITH_TIMEZONE)`
+keeps the column mapped to the `timestamp with time zone` type Flyway created in `V1`.
+
+**Associations.** All `@ManyToOne` are `fetch = LAZY` (overriding the JPA default of EAGER) and
+`optional = false`, so the FK column is `NOT NULL`. `Order.items` is the only rich `@OneToMany`:
+`cascade = ALL` + `orphanRemoval = true`, mutated through `order.addItem(product, qty, price)` /
+`order.removeItem(item)` helpers that also refresh the cached `totalAmount`. `Category.products`
+is the thin inverse side — `mappedBy`, no cascade to delete, read-mostly.
+
+**`OrderItem` is a join entity, not a `@ManyToMany`.** `Order` ↔ `Product` is conceptually
+many-to-many, but the link row carries `quantity` and `unitPrice` (captured at order time), so
+it is modelled as an entity with two `@ManyToOne`s and a `uq_order_item_order_product` unique
+constraint. This is the standard "many-to-many with attributes" pattern.
+
+**`Address` is a `record`, entities are Lombok.** `Address` is an immutable `@Embeddable`
+value object → a Java record (Hibernate 7 maps record embeddables for `@Embedded`). The five
+entities are the one place Lombok is allowed: `@Getter` / `@Setter` on the mutable fields,
+`@NoArgsConstructor(access = PROTECTED)`, **no** `@Data` / `@EqualsAndHashCode` / `@ToString`.
+`equals` / `hashCode` are hand-written against the **business key** (`Category.name`,
+`Product.sku`, `Customer.email`, `Order.orderNumber`, `OrderItem` = order + product), which has
+no setter so it stays stable in a `HashSet`.
+
+**`order` is a reserved word.** `Order` wraps its `@Table` name in backticks — Hibernate's
+portable "quote this identifier" marker — and emits `"order"` on Oracle. `V2`, both seeds, and
+`OrdersSeedIT` all quote it the same way. Oracle folds unquoted identifiers to upper case, so
+from SQL the table is always `"order"` (quoted, lower-case).
+
+**Orders seed — same two-tier convention as the catalog (3.1).** `V2` ships with its paired
+baseline seed in the same commit:
+
+| Tier          | File                                  | Loaded by                             | Contents                                                                                              |
+|---------------|---------------------------------------|---------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Baseline seed | `db/migration/R__020_seed_orders.sql` | everyone (incl. Testcontainers tests) | 3 customers, 3 `SEED-*` orders, 5 lines; `MERGE` on the natural keys, line prices read from `product` |
+| Demo bulk     | `db/demo/R__920_demo_orders.sql`      | local `flyway:migrate` only           | ~200 `GEN-*` orders, 1–3 lines each, seeded `DBMS_RANDOM`                                             |
+
+`R__020` recomputes each seeded order's `total_amount` from its lines at the end, so the cached
+column always matches. `OrdersSeedIT` asserts the baseline is present, consistent, and that no
+`GEN-*` rows leak into the test database.
+
+**Verification.** `CatalogDomainMappingIT` (a `@Transactional` `*IT`) persists a `Customer` +
+`Order` + two `OrderItem`s off seeded products, round-trips through `flush` / `clear`, and
+asserts the reloaded graph: item count, `totalAmount`, lazy nav, auditing fields, `@Version`
+starting at 0 then incrementing, and `orphanRemoval` deleting a line row. Every other
+`@SpringBootTest` in the module also boots the full context under `validate`, so a mapping that
+disagrees with `V1`/`V2` fails the whole build.

@@ -273,3 +273,34 @@ Patterns captured after user corrections. Review at session start.
   (`*.sql` / `*.sql.gz` / `*.sh`); every-startup scripts: `/container-entrypoint-startdb.d`.
 - Image is large (~2 GB) and slow to first-start; cache the container once per JVM via the singleton
   pattern so `verify` starts Oracle only once.
+- On a small host (8 GB), stacking two `verify` runs (compose Oracle + the previous run's Testcontainers
+  Oracle not yet reaped + a new one) can make the new container miss its `DATABASE IS READY TO USE!`
+  log wait → `ContainerLaunchException: Timed out ...` → `AbstractOracleIntegrationTest.<clinit>` throws →
+  every dependent IT fails with `NoClassDefFoundError`. Transient; re-run. Not a code fault.
+
+## Spring Data JPA auditing does not support `OffsetDateTime` (U3.2)
+
+- `@CreatedDate` / `@LastModifiedDate` fields typed `OffsetDateTime` (or `ZonedDateTime`) blow up at **persist time**, not startup: `IllegalArgumentException: Cannot convert unsupported date type
+  java.time.LocalDateTime to java.time.OffsetDateTime` from `DefaultAuditableBeanWrapperFactory`. The
+  supported set is `LocalDateTime`, `LocalDate`, `LocalTime`, `Instant`, `java.util.Date`, `Long`, `long`.
+- Fix: type the audit fields `Instant`. The catalog columns are Oracle `timestamp with time zone` (from
+  `V1`), so add `@JdbcTypeCode(SqlTypes.TIMESTAMP_WITH_TIMEZONE)` to keep Hibernate mapping the `Instant`
+  onto that column type (validate then stays green). Plain non-audited temporal fields (`Order.placedAt`)
+  can stay `OffsetDateTime` — Hibernate itself maps that to `timestamp with time zone` fine; it is only
+  the Spring Data auditing converter that is fussy.
+- `@EnableJpaAuditing` must be present somewhere (`config/persistence/PersistenceConfig`) or the
+  `AuditingEntityListener` on the `@MappedSuperclass` silently never runs.
+
+## Reserved-word table name (`order`) on Oracle + Hibernate + Flyway (U3.2)
+
+- Annotate the entity `@Table(name = "`order`")` — backticks are Hibernate's portable "quote this
+  identifier" marker; it emits `"order"` on Oracle. Flyway DDL/seed scripts must `create table "order"` /
+  `from "order"` (quoted) too, and any hand-written JDBC/JdbcClient SQL as well.
+- Oracle folds unquoted identifiers to UPPER case in the data dictionary, but a quoted lower-case
+  `"order"` stays lower-case — so it is `"order"` everywhere in SQL, never `ORDER` or `"ORDER"`.
+
+## Hibernate 7 record `@Embeddable`
+
+- A Java `record` works as an `@Embeddable` for a plain `@Embedded` field (immutable value object).
+  `@Column` / `@AttributeOverride` on the record components map and validate normally. Keeps the
+  "records for value objects, Lombok only for entities" rule intact.

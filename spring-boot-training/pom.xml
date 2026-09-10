@@ -57,6 +57,17 @@
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
 
+		<!-- Lombok: compile-time only, for the JPA @Entity classes (U3.2) - @Getter/@Setter on the mutable
+		     fields, @NoArgsConstructor(PROTECTED). Records cover everything else (CLAUDE.md "Lombok vs
+		     records"). The parent pom already wires lombok as an annotation-processor path; this adds it to
+		     the compile classpath. optional=true keeps it off any downstream classpath, and
+		     spring-boot-maven-plugin excludes org.projectlombok from the repackaged jar. Version from the BOM. -->
+		<dependency>
+			<groupId>org.projectlombok</groupId>
+			<artifactId>lombok</artifactId>
+			<optional>true</optional>
+		</dependency>
+
 		<!-- Oracle JDBC driver (runtime only; the app compiles against JPA, not the driver). ojdbc17 is the
 		     JDK 17+ build - the right one for the Java 25 toolchain and virtual threads. Version comes from
 		     the Spring Boot BOM property oracle-database.version. -->

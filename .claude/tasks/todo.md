@@ -64,7 +64,7 @@ separate and out of scope here — no AI code in this wave.
 
 - [x] **3.1 Datasource & migrations** — HikariCP config, Flyway `V1__create_catalog.sql` (+ later
   versions), `spring.jpa.hibernate.ddl-auto=validate`, Testcontainers Oracle base test class.
-- [ ] **3.2 Spring Data JPA — model & associations** — `Category`, `Product`, `Customer`, `Order`,
+- [x] **3.2 Spring Data JPA — model & associations** — `Category`, `Product`, `Customer`, `Order`,
   `OrderItem` entities (Lombok `@Getter/@Setter`, `@NoArgsConstructor(PROTECTED)`, business-key
   `equals`/`hashCode`, `@Version`), `@ManyToOne` / `@OneToMany` / `@ManyToMany` join entity,
   `@Embeddable Address`, `OrderStatus` enum, JPA auditing (`@CreatedDate` / `@LastModifiedDate`).
@@ -388,3 +388,49 @@ the small baseline. Now `db/demo` is a permanent `<location>` on the flyway-mave
 then wraps it, which the plugin rejects). `./mvnw flyway:migrate` applies both tiers; the tests
 still get baseline only via Boot's `spring.flyway.locations: classpath:db/migration`. `demo` Maven
 profile deleted; docs + lessons corrected.
+
+### 3.2 Spring Data JPA — model & associations (done)
+
+- New flat package `gr.codelearn.springbootai.training.catalog` (+ `@NullMarked package-info`) holds all
+  five entities, `Address`, `OrderStatus` — the "catalog vertical slice carries U3 + U4" agreed decision.
+  Everything package-private (tests sit in the same package).
+- `AbstractAuditableEntity` (`@MappedSuperclass`, `@EntityListeners(AuditingEntityListener.class)`):
+  `id` (`@GeneratedValue(IDENTITY)`), `createdAt`/`updatedAt`, `version` (`@Version` `Long`). `config/
+  persistence/PersistenceConfig` (`@Configuration @EnableJpaAuditing`) + its own `@NullMarked package-info`.
+- Entities: `Category` (inverse `@OneToMany products` + `addProduct` helper), `Product`
+  (`@ManyToOne(optional=false, LAZY)` category), `Customer` (`@Embedded Address billingAddress`), `Order`
+  (`@ManyToOne` customer, `@Enumerated(STRING)` status, `@OneToMany(cascade=ALL, orphanRemoval=true)` items
+  via `addItem(product, qty, price)` / `removeItem` + `recalculateTotal`, `@Embedded @AttributeOverrides`
+  shipping address on `ship_*`), `OrderItem` (join entity: two `@ManyToOne` + `quantity`/`unitPrice`,
+  `uq_order_item_order_product`). Lombok `@Getter`/`@Setter` on mutable fields only, protected no-args
+  ctor, hand-written business-key `equals`/`hashCode` (key fields have no setter, so they stay stable in a
+  `Set`). `Address` is a `record` `@Embeddable` (Hibernate 7 maps it fine). `BigDecimal` columns pinned
+  `precision = 12, scale = 2`.
+- `Order` table is `@Table(name = "`order`")` (backtick = Hibernate portable quoting → `"order"` on
+  Oracle). `V2`, both seeds and `OrdersSeedIT` quote it identically.
+- **Auditing type gotcha (lessons):** Spring Data JPA auditing rejects `OffsetDateTime` for
+  `@CreatedDate`/`@LastModifiedDate` (`DefaultAuditableBeanWrapperFactory` supports `LocalDateTime` /
+  `Instant` / `Date` / `Long` only — fails at *persist* time, not startup). Switched the two audit fields
+  to `Instant` + `@JdbcTypeCode(SqlTypes.TIMESTAMP_WITH_TIMEZONE)` so they still map to the `timestamp
+  with time zone` columns `V1` created. `Order.placedAt` stays `OffsetDateTime` (plain field, not audited).
+- `V2__create_orders.sql`: `customer`, `"order"`, `order_item` — V1 conventions (identity PKs,
+  `created_at`/`updated_at`/`version` trio, `default` before `not null`, `pk_`/`fk_`/`ix_`/`uq_`/`ck_`,
+  an `ix_` per FK column). `ck_order_status` pins the enum names.
+- Seed (both tiers, per the 3.1 "Deferred to 3.2" note + CLAUDE.md "extend the paired seed in the same
+  pass"): `db/migration/R__020_seed_orders.sql` baseline (3 customers, 3 `SEED-*` orders, 5 lines, one
+  `MERGE` per table on the natural key, line prices read from `product`, final `update` recomputes each
+  order's `total_amount`); `db/demo/R__920_demo_orders.sql` bulk (~200 `GEN-*` orders, 1–3 lines each,
+  seeded `DBMS_RANDOM`, product picked by fixed offset so `uq_order_item_order_product` is never hit).
+- Tests: `catalog/CatalogDomainMappingIT` (`@Transactional` `*IT`, `EntityManager`) — graph persist +
+  `flush`/`clear` reload, item count, `totalAmount`, lazy nav, auditing populated, `@Version` 0 → +1 on
+  update, `orphanRemoval` drops the line row. `persistence/OrdersSeedIT` (`JdbcClient`, mirrors
+  `CatalogSeedIT`) — baseline present + consistent (totals match lines, no dangling FKs), no `GEN-*` leak.
+- `pom.xml`: added `org.projectlombok:lombok` (`optional=true`) — it was only an annotation-processor
+  path in the parent, not a compile dependency.
+- Docs: `README.md` `### 3.2` section. `lessons.md`: the auditing-type gotcha.
+- Transient flake seen once mid-work: Testcontainers Oracle `Timed out waiting for '...DATABASE IS READY
+  TO USE!...'` when two `verify` runs stacked (compose Oracle + two Testcontainers Oracles on an 8 GB
+  host). Re-ran clean. Not a code issue.
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS (surefire 36 unchanged, failsafe 14 = +8:
+  `CatalogDomainMappingIT` 4, `OrdersSeedIT` 4; `DatasourceMigrationIT` / `CatalogSeedIT` unchanged).
+  All touched files reformatted via the `idea` MCP.
