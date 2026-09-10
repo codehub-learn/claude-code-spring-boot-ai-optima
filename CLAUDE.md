@@ -38,12 +38,12 @@ Never mark a task done until `./mvnw verify` passes.
 ## Formatting
 
 `.editorconfig` is the single source of truth (tabs, 140-col lines, CRLF, UTF-8, no final newline, and the IntelliJ
-`ij_*` layout keys). There is **no build-time formatting gate** — `spotless` was removed because no Maven formatter
+`ij_*` layout keys). There is **no build-time formatting gate**: `spotless` was removed because no Maven formatter
 can honour the `ij_*` alignment keys, only IntelliJ can.
 
 - After creating or editing any file (Java, XML/pom, SQL, YAML, …), Claude MUST reformat it through the IntelliJ MCP
   before finishing: `idea` server, `reformat_file` tool, passing the project-relative paths it touched.
-- Do not hand-align or hand-indent to "match" — let the IDE do it. If the `idea` MCP is unavailable, say so and leave
+- Do not hand-align or hand-indent to "match"; let the IDE do it. If the `idea` MCP is unavailable, say so and leave
   formatting to the user rather than guessing.
 
 ## Maven multi-module layout
@@ -221,45 +221,48 @@ Micrometer is still the internal facade; OTLP is the wire protocol; the Grafana 
 
 ## Commit messages
 
-Conventional Commits, kept short, with two house rules: the type is `feature` (not `feat`), and the curriculum topic goes in the subject as
-`[Ux.y]`. Never commit without the user asking.
+Conventional Commits, kept short, with two house rules: the type is `feature` (not `feat`), and a commit that implements a
+`.claude/tasks/todo.md` unit/topic tags it in the subject as `[Ux.y]`. Never commit without the user asking.
 
-- **Subject**: `type(scope) [Ux.y]: summary` — imperative mood, lowercase, no trailing period, ≤ 140 chars (aim for ~72; the hard cap is
-  140).
+- **Subject**: `type(scope) [Ux.y]: summary`. Imperative, lowercase, no trailing period, ≤ 140 chars (aim ~72).
 	- `type` ∈ `feature` `fix` `docs` `refactor` `test` `build` `chore` `style`.
 	- `scope` = the module directory (`training`, `pom`, …); omit for repo-wide changes.
-	- `[Ux.y]` = the `docs/spring-boot-scope.md` unit/topic the commit belongs to (e.g. `[U3.2]`), placed after the scope (or after the type
-	  when there is no scope). Omit the bracket entirely when the commit does not map to a curriculum topic.
-- **Body** (optional): only when the *why* is not obvious from the subject. A few `-` bullets, one line each, do not wrap — what changed and
+	- `[Ux.y]` is the **exception, not the default**. Add it only when the commit's main purpose is to implement a specific
+	  `.claude/tasks/todo.md` unit/topic (usually a `feature` or `test` commit); it goes after the scope, or after the type when
+	  there is no scope. Leave it off everything else: bug fixes, tooling, refactors, follow-up work on a delivered topic. When
+	  unsure, omit it.
+- **Body** (optional): only when the *why* is not obvious from the subject. A few `-` bullets, one line each, do not wrap: what changed and
   why, not a narration of every file. No essays.
-- **Breaking change**: `!` immediately before the colon — `type(scope) [Ux.y]!: summary` (or `type(scope)!: summary` with no bracket) — plus
-  a `BREAKING CHANGE: <what + migration>` trailer.
+- **Breaking change**: `!` immediately before the colon (`type(scope) [Ux.y]!: summary`, or `type(scope)!: summary` with no bracket), plus a
+  `BREAKING CHANGE: <what + migration>` trailer.
 - **Trailer**: every commit ends with `Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>`. Do **not** add
   `Co-Authored-By` or other AI-attribution trailers.
 
 **Before every commit (a fresh commit or `git commit --amend` on `HEAD`), Claude MUST:**
 
-1. Ask the user whether to run `./mvnw verify` first. Run it only if they say yes; if it fails, stop and report — do not commit.
-2. Show the user the full proposed commit message and wait — the user edits or approves it before it is used; never pass an unreviewed
+1. Ask the user whether to run `./mvnw verify` first. Run it only if they say yes; if it fails, stop and report, do not commit.
+2. Show the user the full proposed commit message and wait: the user edits or approves it before it is used; never pass an unreviewed
    message to `git commit`.
 3. Handle tags:
 	- **New commit**: ask whether to tag it. If yes, ask for the exact tag (and, if wanted, a tag message), then create it with `git tag`.
-	- **Amending `HEAD`**: list the tag (s) currently on it (`git tag --points-at HEAD`) and ask, per tag, whether to move it to the amended
-	  commit (`git tag -f`), leave it, or delete it — the amend changes the SHA, so never silently leave a tag on the old commit. If an
+	- **Amending `HEAD`**: list the tag(s) currently on it (`git tag --points-at HEAD`) and ask, per tag, whether to move it to the amended
+	  commit (`git tag -f`), leave it, or delete it: the amend changes the SHA, so never silently leave a tag on the old commit. If an
 	  affected tag was already pushed, confirm the force-push first.
 
 Only `HEAD` is amended this way. Rewording an older commit (interactive rebase) is a manual operation the user drives.
 
-```
-feature(training) [U3.2]: two-tier Flyway seed data for the catalog
+A feature commit that implements a `todo.md` topic (body optional, tagged):
 
-- add repeatable baseline seed R__010_seed_catalog.sql (idempotent MERGE, 6 categories + 24 products); runs in db/migration, tests included
-- add demo bulk R__910_demo_catalog.sql (~500 rows), opt-in via -Pdemo
-- drive flyway-maven-plugin locations from ${flyway.locations}; add demo profile
-- add CatalogSeedIT; document in README and CLAUDE.md
+```
+feature(training) [U3.3]: paged and sorted product queries
+
+- add ProductRepository derived queries + Pageable overloads
+- @EntityGraph on findWithCategory to kill the N+1
 
 Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>
 ```
+
+A fix with no topic and no body:
 
 ```
 fix(training): quote flyway_schema_history identifiers for Oracle
@@ -267,8 +270,10 @@ fix(training): quote flyway_schema_history identifiers for Oracle
 Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>
 ```
 
+A breaking change (`!` before the colon, `BREAKING CHANGE:` trailer):
+
 ```
-refactor(training) [U4.2]!: rename app.catalog.* to app.catalog.paging.*
+refactor(training)!: rename app.catalog.* to app.catalog.paging.*
 
 BREAKING CHANGE: `app.catalog.default-page-size` / `max-page-size` move under `app.catalog.paging.*`. Update application-*.yml overrides.
 
