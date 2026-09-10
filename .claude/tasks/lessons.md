@@ -380,3 +380,40 @@ Patterns captured after user corrections. Review at session start.
   lower-case `sales_ledger` in a `.sql("select … from sales_ledger …")` is fine — same as the
   Flyway scripts and the catalog `@Table(name = "category")` under Hibernate. The quoting behaviour
   is specific to Spring Data JDBC's identifier handling.
+
+## springdoc-openapi version tracks the Spring Boot MAJOR (U4.1)
+
+- springdoc-openapi is **not** in the Spring Boot BOM — pin it with a `*.version` property in the
+  reactor parent. Its MAJOR version tracks Spring Boot's: the **3.x** line targets Spring Boot 4 /
+  Spring Framework 7 (2.x = Boot 3, 1.x = Boot 2). Used `3.1.1` (latest at the time, declares Boot 4
+  support). Artifact: `org.springdoc:springdoc-openapi-starter-webmvc-ui` (webjar + generator).
+  Defaults: spec `/v3/api-docs`, UI `/swagger-ui.html`.
+- The context-mode plugin's PreToolUse hook was intercepting WebFetch/curl this session (its own DB
+  was broken → "unable to open database file"). `ctx_execute` was rejected by the user. Workaround:
+  plain `WebFetch` on a non-redirecting URL still worked once; Maven `dependency:resolve` confirms a
+  version actually exists.
+
+## Boot 4.1: @WebMvcTest / @AutoConfigureMockMvc / MockMvcTester live in spring-boot-webmvc-test (U4.1)
+
+- Same modularization story as the U3.6 persistence slices: `spring-boot-starter-test` pulls **none**
+  of the web test slice. Add `org.springframework.boot:spring-boot-webmvc-test` (test scope) for
+  `@WebMvcTest`, `@AutoConfigureMockMvc`, and the `MockMvcTester` bean.
+- Packages: `org.springframework.boot.webmvc.test.autoconfigure.{WebMvcTest, AutoConfigureMockMvc}`.
+  `MockMvcTester` itself is `org.springframework.test.web.servlet.assertj.MockMvcTester` (spring-test);
+  its `bodyJson().extractingPath(...)` value assert has `asArray()` / `asNumber()` / `asString()` /
+  `convertTo(Class)` — no `asList()`, and `isEqualTo(10)` on a JSON number is type-fragile, use
+  `convertTo(Integer.class).isEqualTo(10)`.
+- `@MockBean` is gone — use `org.springframework.test.context.bean.override.mockito.MockitoBean`.
+- `@WebMvcTest` **does** pull app `WebMvcConfigurer` beans into the slice. If one needs a bean the
+  slice doesn't bind (`config.web.WebConfig` needs `AppProperties`), filter it:
+  `excludeFilters = @ComponentScan.Filter(type = ASSIGNABLE_TYPE, classes = WebMvcConfigurer.class)`.
+  Cover that config's behaviour in the full-context `*ApiIT` instead.
+
+## REST controllers: serialize PagedModel, never Page / PageImpl (U4.1)
+
+- Returning a Spring Data `Page` / `PageImpl` straight from a controller has an unstable JSON shape
+  and Spring Data logs a warning at startup. Wrap it: `new PagedModel<>(page)` →
+  `{ "content": [...], "page": { "size", "number", "totalElements", "totalPages" } }`.
+- Config-driven paging without per-method clamping: a
+  `PageableHandlerMethodArgumentResolverCustomizer` `@Bean` (`setMaxPageSize` / `setFallbackPageable`).
+  `@PageableDefault` on the arg overrides the fallback but the max-size clamp still applies.

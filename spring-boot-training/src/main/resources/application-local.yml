@@ -35,3 +35,8 @@ spring:
       enabled: true
     livereload:
       enabled: true
+
+springdoc:
+  swagger-ui:
+    # "Try it out" is enabled per-operation by default; make it the standing state for local exploration.
+    try-it-out-enabled: true

@@ -42,6 +42,15 @@
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
 
+		<!-- OpenAPI 3 + Swagger UI (U4.1). Scans the @RestControllers and serves the spec at /v3/api-docs and
+		     the UI at /swagger-ui.html. Not in the Spring Boot BOM - version pinned via the reactor property
+		     springdoc-openapi.version (the 3.x line targets Spring Boot 4 / Spring Framework 7). -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>${springdoc-openapi.version}</version>
+		</dependency>
+
 		<!-- Spring AOP + AspectJ pointcut/annotation support: the @Aspect method-timing demo in
 		     foundation.components (topic 2.3). Boot 4 renamed spring-boot-starter-aop to -aspectj. -->
 		<dependency>
@@ -116,6 +125,15 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- Web MVC test slice (U4.1). Boot 4.1 keeps @WebMvcTest / @AutoConfigureMockMvc / MockMvcTester in
+		     their own module - spring-boot-starter-test does NOT pull it (same split as the U3.6 persistence
+		     slices). Needed by the *ControllerTest slices and the @AutoConfigureMockMvc *ApiIT tests. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 

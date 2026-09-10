@@ -781,3 +781,80 @@ transaction that the row is gone.
 **Verification.** `ProductRepositoryDataJpaTest` (4, surefire), `CategorySalesQueryJdbcTest` (3,
 surefire), `persistence/PersistenceRollbackIT` (2, failsafe). `./mvnw -pl spring-boot-training
 verify` → surefire 43 (+7), failsafe 50 (+2), all green.
+
+## U4 — REST API Development
+
+### 4.1 Controllers & REST endpoints
+
+The first HTTP layer on the `catalog` slice: `CatalogController` and `OrderController` under
+`/api/v1`, plus `CatalogService` (the read/write use cases for products and categories) and a new
+`config.web` package (CORS, config-driven paging, OpenAPI metadata). DTOs and mapping are kept **thin** — plain `*Request` / `*Response`
+records and hand-written `@Component` mappers (`CatalogWebMapper`, `OrderWebMapper`); U4.3 reshapes the records (Jackson 3, `@JsonView`,
+nested
+order lines, PATCH bodies) and U4.4 moves the mapping to MapStruct. Bean Validation is U4.2.
+
+**Endpoints.**
+
+| Verb + path                                 | Binding                                                        | Success                             | Failure                        |
+|---------------------------------------------|----------------------------------------------------------------|-------------------------------------|--------------------------------|
+| `GET /api/v1/products`                      | `ProductFilter` + `Pageable` query params (`@ParameterObject`) | `200` `PagedModel<ProductResponse>` | —                              |
+| `GET /api/v1/products/{sku}`                | `@PathVariable`                                                | `200`                               | `404`                          |
+| `POST /api/v1/products`                     | `@RequestBody CreateProductRequest`                            | `201` + `Location`                  | `409` duplicate sku            |
+| `PUT /api/v1/products/{sku}`                | path + body                                                    | `200`                               | `404`                          |
+| `DELETE /api/v1/products/{sku}`             | `@PathVariable`                                                | `204`                               | `404`                          |
+| `GET /api/v1/categories`                    | —                                                              | `200` `List<CategoryResponse>`      | —                              |
+| `GET /api/v1/categories/{name}`             | `@PathVariable`                                                | `200`                               | `404`                          |
+| `POST /api/v1/categories`                   | `@RequestBody CreateCategoryRequest`                           | `201` + `Location`                  | `409`                          |
+| `POST /api/v1/orders`                       | `@RequestBody PlaceOrderRequest`                               | `201` + `Location`                  | `404` unknown customer/product |
+| `GET /api/v1/orders/{orderNumber}`          | `@PathVariable`                                                | `200`                               | `404`                          |
+| `GET /api/v1/orders`                        | `?customerEmail=&status=` (`@RequestParam`)                    | `200` `List<OrderResponse>`         | —                              |
+| `PATCH /api/v1/orders/{orderNumber}/status` | path + `UpdateOrderStatusRequest`                              | `200`                               | `404`                          |
+
+Controllers only bind, delegate, and shape the `ResponseEntity` — no repository, no entity, no
+`@Transactional`. `ResponseEntity.created(uri)` / `.noContent()` for the `201`/`204` cases; the
+`Location` URI is built with `ServletUriComponentsBuilder`. A status transition is a `PATCH` on a
+`/status` sub-resource, **not** a `POST …/cancel` verb in the URL.
+
+**Pagination is config, not code.** `WebConfig` registers a
+`PageableHandlerMethodArgumentResolverCustomizer` that clamps every `Pageable` argument to
+`app.catalog.max-page-size` and falls back to `app.catalog.default-page-size` — the concrete use of
+the U1.3 `AppProperties.Catalog` guard-rails. `CatalogApiIT` asserts a `?size=50` request comes
+back with `page.size = 10` under the `test` profile.
+
+**Serialize `PagedModel`, never `PageImpl`.** `listProducts` wraps the service's `Page` in
+`new PagedModel<>(page)` (Spring Data's stable DTO: `{ "content": [...], "page": { size, number,
+totalElements, totalPages } }`). Returning a raw `Page` / `PageImpl` from a controller has an
+unstable JSON contract and Spring Data logs a warning.
+
+**Content negotiation.** The controllers declare `produces = application/json`; Jackson 3 is the
+only message converter on the classpath, so an `Accept: application/xml` request is answered
+`406 Not Acceptable` by MVC, no controller code involved.
+
+**Error mapping is a U4.1 stopgap.** `CatalogNotFoundException` carries `@ResponseStatus(NOT_FOUND)`
+and `CatalogDuplicateException` `@ResponseStatus(CONFLICT)` so the failure paths work and are
+testable now. U4.2 removes both annotations and routes the exceptions through a central
+`@RestControllerAdvice` as RFC 9457 `ProblemDetail`.
+
+**OpenAPI.** `springdoc-openapi-starter-webmvc-ui` (3.1.1 — the 3.x line targets Spring Boot 4 /
+Spring Framework 7; not Boot-BOM-managed, pinned via `springdoc-openapi.version` in the reactor
+parent). Spec at `/v3/api-docs` (OpenAPI 3.1 JSON), UI at `/swagger-ui.html`. `config.web.OpenApiConfig`
+supplies the document title/version/tags; `@Tag` / `@Operation` / `@ApiResponse` annotate the
+controllers.
+
+```bash
+docker compose up -d
+./mvnw -pl spring-boot-training spring-boot:run
+# http://localhost:8080/swagger-ui.html   http://localhost:8080/v3/api-docs
+curl -s 'localhost:8080/api/v1/products?size=3'
+curl -i -X POST localhost:8080/api/v1/products -H 'Content-Type: application/json' \
+  -d '{"sku":"DEMO-1","name":"Demo","description":null,"price":9.99,"categoryName":"Storage"}'
+curl -i localhost:8080/api/v1/products/NOPE            # 404
+curl -i -H 'Accept: application/xml' localhost:8080/api/v1/products/LAP-0001   # 406
+```
+
+**Verification.** Slices (`@WebMvcTest`, `MockMvcTester`, mocked services): `CatalogControllerTest`
+(6), `OrderControllerTest` (5). HTTP integration (`extends AbstractOracleIntegrationTest` +
+`@AutoConfigureMockMvc`, real Oracle + Flyway seed): `CatalogApiIT` (4), `OrderApiIT` (2).
+`spring-boot-webmvc-test` is a new test dependency — Boot 4.1 keeps `@WebMvcTest` /
+`@AutoConfigureMockMvc` out of `spring-boot-starter-test`. `./mvnw -pl spring-boot-training verify`
+→ surefire 54 (+11), failsafe 56 (+6), all green.

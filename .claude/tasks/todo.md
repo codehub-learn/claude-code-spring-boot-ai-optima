@@ -82,7 +82,7 @@ separate and out of scope here — no AI code in this wave.
 
 ## U4 — REST API Development (6h)
 
-- [ ] **4.1 Controllers & REST endpoints** — `CatalogController` / `OrderController` under
+- [x] **4.1 Controllers & REST endpoints** — `CatalogController` / `OrderController` under
   `/api/v1/...`, verb mappings, `@PathVariable` / `@RequestParam` / `@RequestBody` binding,
   `ResponseEntity` with explicit status codes (201 + `Location`, 204, etc.), pagination params,
   content negotiation, springdoc OpenAPI annotations + `/swagger-ui.html`.
@@ -604,3 +604,55 @@ profile deleted; docs + lessons corrected.
 - `./mvnw -pl spring-boot-training clean verify` → BUILD SUCCESS: surefire 43 = +7 (`ProductRepositoryDataJpaTest` 4,
   `CategorySalesQueryJdbcTest` 3), failsafe 50 = +2 (`PersistenceRollbackIT`); all prior tests unchanged. All touched files reformatted via
   the `idea` MCP.
+
+### 4.1 Controllers & REST endpoints (done)
+
+- First HTTP layer on the `catalog` slice. New `config/web` package (`@NullMarked package-info`):
+  `WebConfig implements WebMvcConfigurer` (CORS from `AppProperties.Cors` on `/api/**`; a
+  `PageableHandlerMethodArgumentResolverCustomizer` bean that clamps every `Pageable` arg to
+  `app.catalog.max-page-size` / falls back to `default-page-size` — the first real use of the U1.3
+  guard-rails), `OpenApiConfig` (`@Bean OpenAPI` — title/version/tags; version from `BuildProperties`
+  via `ObjectProvider`, `"dev"` fallback under `spring-boot:run`).
+- `catalog` service layer for products/categories: `CatalogService` (`@Service`, package-private,
+  `@Transactional`; reads `readOnly`). `findProducts` composes the existing `ProductSpecifications`
+  fragments via `Specification.allOf`; unknown filter category → `Page.empty`. Writes: create (dup-key guard), replace (PUT), delete,
+  create-category. Returns `*Response` records only — mapping
+  by `CatalogWebMapper` (`@Component`, hand-written) inside the tx while `category` is still attached.
+- `OrderService` gained two additive methods (the U3.4 exhibit untouched): `listOrders(email,
+  status)` and `updateStatus(orderNumber, status)`, both returning `OrderConfirmation`.
+- Controllers (both `@RestController`, package-private, `produces = application/json`):
+  `CatalogController` (`/api/v1`, products CRUD + categories) and `OrderController`
+  (`/api/v1/orders`, place / get / list / `PATCH …/status`). `ResponseEntity.created(uri)` /
+  `.noContent()`; `Location` via `ServletUriComponentsBuilder`. Status change is `PATCH` on a
+  `/status` sub-resource, no `/cancel` verb. `@Tag` / `@Operation` / `@ApiResponse` on both.
+- **Thin DTOs / mapping** (user decision): 12 plain `*Request` / `*Response` / filter records + two
+  `@Component` mappers. U4.3 reshapes the records (Jackson 3, `@JsonView`, nested order lines,
+  PATCH); U4.4 swaps the mappers for MapStruct. Bean Validation is U4.2.
+- **Error mapping stopgap** (user decision): `@ResponseStatus(NOT_FOUND)` on `CatalogNotFoundException`,
+  new `CatalogDuplicateException` with `@ResponseStatus(CONFLICT)`. U4.2 removes both and centralises
+  on a `@RestControllerAdvice` → RFC 9457 `ProblemDetail`. (Small deviation from the plan, which only
+  named the 404 stopgap — a duplicate is a 409, not a "not found".)
+- **`PagedModel`, not `PageImpl`.** `listProducts` returns `new PagedModel<>(page)` — stable JSON
+  contract (`{content, page:{size,number,totalElements,totalPages}}`); a raw `Page` from a controller
+  is unstable and Spring Data warns.
+- **Content negotiation**: class-level `produces = application/json` + Jackson-3-only classpath →
+  `Accept: application/xml` answered `406`, no controller code.
+- Deps: `org.springdoc:springdoc-openapi-starter-webmvc-ui` 3.1.1 (3.x line = Spring Boot 4 /
+  Framework 7; not Boot-BOM-managed — pinned via new reactor `springdoc-openapi.version` property).
+  Test: `spring-boot-webmvc-test` (Boot 4.1 keeps `@WebMvcTest` / `@AutoConfigureMockMvc` /
+  `MockMvcTester` out of `spring-boot-starter-test` — same split as the U3.6 slices).
+  `application.yml` gains a `springdoc:` block (library defaults, stated for discoverability);
+  `application-local.yml` sets `try-it-out-enabled`.
+- No schema / seed / Flyway change — tests run on the existing `R__010` / `R__020` baseline.
+- Tests: `catalog/CatalogControllerTest` (6) + `catalog/OrderControllerTest` (5) `@WebMvcTest`
+  slices with `MockMvcTester` + `@MockitoBean` (the app `WebMvcConfigurer` is filtered out of the
+  slice — it needs `AppProperties`; its behaviour is covered by the IT). `catalog/CatalogApiIT` (4)
+	+ `catalog/OrderApiIT` (2) `extends AbstractOracleIntegrationTest` + `@AutoConfigureMockMvc` —
+	  real context + Oracle + Flyway seed; page-size clamp asserted; `API-`-prefixed rows cleaned in
+	  `@AfterEach` (not `@Transactional`, `OrderServiceIT` precedent).
+- Docs: `README.md` `## U4` + `### 4.1` (endpoint table + all the notes above). `lessons.md`:
+  springdoc version alignment, `spring-boot-webmvc-test`, `PagedModel`-not-`PageImpl`. Memory
+  `boot4-modularized-test-packages` extended with the `@WebMvcTest` package.
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 54 = +11 (`CatalogControllerTest` 6, `OrderControllerTest` 5), failsafe
+  56 = +6 (`CatalogApiIT` 4,
+  `OrderApiIT` 2); all prior tests unchanged. All touched files reformatted via the `idea` MCP.

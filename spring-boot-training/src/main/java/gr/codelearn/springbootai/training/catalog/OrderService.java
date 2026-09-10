@@ -1,5 +1,6 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -178,5 +179,41 @@ class OrderService {
 	 */
 	boolean checkViaInjectedProxy() {
 		return self.probeTransactionActive();
+	}
+
+	// ---- U4.1: use cases the REST layer needs, on top of the U3.4 transaction exhibit
+	// ----------------------------------------------------
+
+	/**
+	 * Lists orders, optionally narrowed by customer email or status (either, both, or neither). {@code readOnly} — the confirmations are
+	 * built while the aggregates are still attached, so {@code lineCount} does not trip a {@code LazyInitializationException}.
+	 */
+	@Transactional(readOnly = true)
+	public List<OrderConfirmation> listOrders(final @Nullable String customerEmail, final @Nullable OrderStatus status) {
+		final List<Order> orders;
+		if (customerEmail != null && !customerEmail.isBlank()) {
+			orders = orderRepository.findByCustomerEmail(customerEmail);
+		} else if (status != null) {
+			orders = orderRepository.findByStatus(status);
+		} else {
+			orders = orderRepository.findAll();
+		}
+		return orders.stream()
+					 .filter(o -> status == null || o.getStatus() == status)
+					 .map(OrderConfirmation::from)
+					 .toList();
+	}
+
+	/**
+	 * Moves an order to a new {@link OrderStatus}. A read-write transaction: the loaded entity is dirty on return and Hibernate flushes
+	 * the
+	 * {@code update} at commit. An unknown order number is a {@link CatalogNotFoundException} (→ {@code 404} until U4.2).
+	 */
+	@Transactional
+	public OrderConfirmation updateStatus(final String orderNumber, final OrderStatus newStatus) {
+		final Order order = orderRepository.findByOrderNumber(orderNumber)
+										   .orElseThrow(() -> new CatalogNotFoundException("No order " + orderNumber));
+		order.setStatus(newStatus);
+		return OrderConfirmation.from(order);
 	}
 }

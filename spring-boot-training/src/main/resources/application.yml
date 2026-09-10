@@ -89,6 +89,19 @@ info:
     name: ${spring.application.name}
     description: Spring Boot fundamentals training module
 
+# springdoc-openapi (U4.1). Values below are the library defaults, stated so the URLs are discoverable:
+#   spec  -> http://localhost:8080/v3/api-docs   (OpenAPI 3.1 JSON)
+#   UI    -> http://localhost:8080/swagger-ui.html
+# Document-level metadata (title, version, tags) is set by config.web.OpenApiConfig.
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+  packages-to-scan: gr.codelearn.springbootai.training
+
 logging:
   structured:
     format:
