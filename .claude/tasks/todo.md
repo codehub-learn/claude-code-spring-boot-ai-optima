@@ -71,7 +71,7 @@ separate and out of scope here — no AI code in this wave.
 - [x] **3.3 Spring Data JPA — repositories & queries** — repositories per aggregate, derived query
   methods, `@Query` JPQL + native, `Pageable` / `Sort`, `Specification` for dynamic filtering,
   `@EntityGraph` to fix N+1, interface + record (DTO) projections.
-- [ ] **3.4 Transactions** — `@Transactional` on services, propagation (`REQUIRES_NEW`), rollback
+- [x] **3.4 Transactions** — `@Transactional` on services, propagation (`REQUIRES_NEW`), rollback
   rules / `rollbackFor`, read-only, "no network/AI in a transaction" note, `@Transactional`
   self-invocation pitfall demo.
 - [ ] **3.5 Spring Data JDBC / JdbcClient read-model** — a reporting slice (e.g. sales-per-category
@@ -472,4 +472,49 @@ profile deleted; docs + lessons corrected.
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 36 unchanged, failsafe
   25 = +11 (`ProductRepositoryIT` 7, `OrderRepositoryIT` 4); `CatalogDomainMappingIT` /
   `OrdersSeedIT` / `CatalogSeedIT` / `DatasourceMigrationIT` unchanged. All touched files
+  reformatted via the `idea` MCP.
+
+### 3.4 Transactions (done)
+
+- First **service layer** in the catalog slice. New in the flat `catalog` package, all
+  package-private, `@Transactional` methods `public` (Spring's proxy only advises public
+  methods — a package-private `@Transactional` method compiles and runs transaction-less):
+  `OrderService` (the exhibit), `OrderFactory` (`PlaceOrderCommand` → `Order` aggregate,
+  resolves customer + products, `CatalogNotFoundException` on a miss — no `@Transactional`, it
+  runs in the caller's tx), `OrderPlacementService` (one `REQUIRES_NEW` method). Records:
+  `PlaceOrderCommand` (+ nested `Line`), `OrderConfirmation` (the non-entity result),
+  `OrderPlacedEvent`. Exceptions: `CatalogNotFoundException` (runtime), `ReceiptDeliveryException`
+  (checked, for `rollbackFor`), `LowStockException` (runtime, for `noRollbackFor`).
+- `OrderService` — one method per concept: `placeOrder` (baseline `@Transactional`, publishes
+  the event), `findOrder` / `peekStatusAfterLocalEdit` (`readOnly = true`; the latter mutates a
+  loaded entity and the read-only tx never flushes it), `placeOrderAndDeliverReceipt`
+  (`rollbackFor` — checked exceptions commit by default), `placeOrderToleratingLowStock`
+  (`noRollbackFor` — runtime exceptions roll back by default; the order commits and the
+  exception still propagates), `placeBatchIndependently` (non-transactional, loops
+  `OrderPlacementService.placeIndependently` = `REQUIRES_NEW`, one bad order does not undo the
+  rest) vs `placeBatchAtomically` (one tx, all-or-nothing), `probeTransactionActive` +
+  `checkViaSelfInvocation` (`this.` → `false`) / `checkViaInjectedProxy` (`@Lazy self` proxy →
+  `true`).
+- **Self-invocation + REQUIRES_NEW both need a proxy hop.** `OrderPlacementService` is a
+  separate bean, not a method on `OrderService`, so the `REQUIRES_NEW` call always crosses the
+  proxy. `@Lazy OrderService self` is injected purely for the `checkViaInjectedProxy` half of
+  the pitfall demo; the Javadoc points at the collaborator as the production pattern.
+- **`@TransactionalEventListener(AFTER_COMMIT)`** live demo (the 2.3 / 3.2 deferral):
+  `OrderService.placeOrder` publishes `OrderPlacedEvent`; `OrderNotifications` handles it after
+  commit (a logged stub for an email / payment / AI call) and never on rollback. This is the
+  concrete answer to the "no network / AI inside a transaction" bullet — the side effect runs
+  once the order is durably committed. `GreetingEventListener`'s stale "no transaction manager
+  in this module yet" Javadoc updated to point here.
+- Tests: `catalog/OrderServiceIT` (8), `extends AbstractOracleIntegrationTest`, **not**
+  `@Transactional` (a test-managed tx would mask commit / `REQUIRES_NEW` / rollback). `TX-`
+  prefixed order numbers, `@AfterEach` deletes them via `JdbcClient`; `@BeforeEach` resets the
+  listener counter. Baseline `R__010` products / `R__020` customers reused.
+- Docs: `README.md` `### 3.4 Transactions` (method→concept table, the proxy-hop rule, the
+  self-invocation pitfall + fixes, read-only flush suppression, the AFTER_COMMIT side-effect
+  rule). No `pom.xml` / migration / seed change (`spring-tx` + `JpaTransactionManager` arrived
+  with `spring-boot-starter-data-jpa` in 3.1). No `lessons.md` entry — no correction occurred;
+  the proxy-visibility and read-only-flush behaviours are captured in the Javadoc + README.
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 36 unchanged, failsafe
+  33 = +8 (`OrderServiceIT`); `CatalogDomainMappingIT` / `OrderRepositoryIT` / `ProductRepositoryIT`
+  / `CatalogSeedIT` / `DatasourceMigrationIT` / `OrdersSeedIT` unchanged. All touched files
   reformatted via the `idea` MCP.

@@ -606,3 +606,51 @@ while the lazy path runs strictly more — the teaching point is verified, not j
 against the `R__010`/`R__020` baseline (rolled back, so the shared seed is untouched); the
 `LazyInitializationException` contrast test proves what the graph buys you. `./mvnw -pl
 spring-boot-training verify` → surefire 36, failsafe 25 (+11), all green.
+
+### 3.4 Transactions
+
+The first **service layer** in the catalog slice. `OrderService` is the exhibit — one method
+per transaction concept — with `OrderFactory` (builds the `Order` aggregate from a
+`PlaceOrderCommand`) and `OrderPlacementService` (`REQUIRES_NEW`) as collaborators. All
+package-private in `catalog`, but every `@Transactional` method is **`public`**: Spring's proxy
+only advises public methods, so `@Transactional` on a package-private method compiles and runs
+with no transaction at all.
+
+`@Transactional` lives on the service, never on the controller or the repository. Input is a
+`PlaceOrderCommand` record (a command object); output is an `OrderConfirmation` record, never
+the `Order` entity.
+
+| Method | Setting | Point |
+|---|---|---|
+| `placeOrder` | `@Transactional` | baseline read-write tx; saves the graph, publishes `OrderPlacedEvent` |
+| `findOrder` | `readOnly = true` | Hibernate flush mode → `MANUAL`, connection flagged read-only; use it for every query method |
+| `peekStatusAfterLocalEdit` | `readOnly = true` | mutates a loaded entity and returns the new value, but the read-only tx **never flushes** — reload and the row is unchanged. A dirty write here is silently lost, not rejected |
+| `placeOrderAndDeliverReceipt` | `rollbackFor = ReceiptDeliveryException.class` | the default rule **commits** on a checked exception; `rollbackFor` opts in to rollback |
+| `placeOrderToleratingLowStock` | `noRollbackFor = LowStockException.class` | the default rule **rolls back** on a `RuntimeException`; `noRollbackFor` opts out, so the order commits and the exception still propagates |
+| `placeBatchIndependently` | *(none)* — delegates to `REQUIRES_NEW` | each order commits in its own transaction (via `OrderPlacementService`), so one bad order does not undo the ones already placed |
+| `placeBatchAtomically` | `@Transactional` | the contrast: one transaction for the batch, first bad order rolls back the lot |
+| `probeTransactionActive` | `@Transactional` | returns `TransactionSynchronizationManager.isActualTransactionActive()` |
+
+**`REQUIRES_NEW` needs a proxy hop.** `OrderPlacementService.placeIndependently` is a separate
+bean, not a method on `OrderService`, on purpose. Propagation only takes effect when the call
+crosses the Spring proxy; a `REQUIRES_NEW` method called on `this` shares the caller's
+transaction as if the annotation were not there.
+
+**Self-invocation pitfall.** `checkViaSelfInvocation()` calls `probeTransactionActive()` on
+`this` → the call never reaches the proxy → no transaction → returns `false`.
+`checkViaInjectedProxy()` calls it through an injected `@Lazy OrderService self` → the advice
+runs → `true`. The fixes are all "go through a proxy": an injected collaborator (what
+`placeBatchIndependently` does), an injected `self`, or a programmatic `TransactionTemplate`.
+
+**No network or AI in a transaction.** An external call from a `@Transactional` method holds
+the DB connection and the new rows' locks for the whole round trip, and its failure rolls the
+business data back. `placeOrder` publishes `OrderPlacedEvent` and `OrderNotifications` handles
+it with `@TransactionalEventListener(AFTER_COMMIT)` — the side effect (confirmation email,
+payment, AI summary; a logged stub here) runs only after the order is durably committed, and
+not at all if the transaction rolled back. This is the live `AFTER_COMMIT` demo the
+`foundation.components` unit (2.3) left dormant.
+
+**Verification.** `OrderServiceIT` (8 tests) runs against real Oracle and is **not**
+`@Transactional` (a test-managed tx would mask commit / `REQUIRES_NEW` / rollback semantics);
+it uses `TX-`-prefixed order numbers and deletes them in `@AfterEach`. `./mvnw -pl
+spring-boot-training verify` → surefire 36, failsafe 33 (+8), all green.

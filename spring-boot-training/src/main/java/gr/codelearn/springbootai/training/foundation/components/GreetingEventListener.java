@@ -22,9 +22,9 @@ import java.util.concurrent.atomic.AtomicReference;
  *       different thread and the publisher does not wait. Needs {@code @EnableAsync}
  *       ({@link ComponentsConfig});</li>
  *   <li>{@link #onGreetingAfterCommit} — {@code @TransactionalEventListener}. Fires only after the surrounding
- *       transaction commits, and is silently skipped when no transaction is active. There is no transaction
- *       manager in this module yet, so it stays dormant until U3.4 — kept here to show the annotation next to
- *       its siblings.</li>
+ *       transaction commits, and is silently skipped when no transaction is active. Nothing in
+ *       {@code foundation} runs a transaction, so this stays dormant here; the live {@code AFTER_COMMIT}
+ *       example is {@code catalog.OrderNotifications}, driven by {@code OrderService.placeOrder} (U3.4).</li>
  * </ul>
  *
  * <p>Handling threads and payloads are recorded so {@code ApplicationEventsTest} can assert them. {@link #reset()}
