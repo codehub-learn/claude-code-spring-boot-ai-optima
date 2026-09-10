@@ -1,17 +1,15 @@
--- Demo-only bulk catalog data. NOT in db/migration, so a plain `flyway:migrate` and the Boot-managed
--- Flyway in the `test` profile never see it. Opt in against a local Oracle only:
+-- Generated bulk catalog data for LOCAL development. The flyway-maven-plugin's <locations> in the
+-- module pom lists both db/migration and db/demo, so `./mvnw -pl spring-boot-training flyway:migrate`
+-- applies this against the local Oracle. The Testcontainers integration tests never see it: Boot's
+-- Flyway (the only one active in the `test` profile) reads spring.flyway.locations = classpath:db/migration.
+-- Purpose: enough rows to make U3.3 pagination, Sort, Specification filtering, and @EntityGraph /
+-- N+1 examples meaningful.
 --
---   ./mvnw -pl spring-boot-training flyway:migrate -Pdemo
---
--- The `demo` Maven profile appends src/main/resources/db/demo to flyway.locations. Purpose: enough
--- rows to make U3.3 pagination, Sort, Specification filtering, and @EntityGraph / N+1 examples
--- meaningful.
---
--- Idempotent: it owns exactly the rows whose sku starts with 'GEN-', deletes them, and regenerates
--- them. DBMS_RANDOM.SEED makes the generated prices reproducible across runs. As a REPEATABLE
--- migration Flyway re-applies it whenever the checksum changes. After running with -Pdemo, a later
--- plain `flyway:migrate` reports R__910 as a missing repeatable (a warning, not a failure);
--- `./mvnw -pl spring-boot-training flyway:clean flyway:migrate` returns the database to baseline.
+-- REPEATABLE migration (R__): re-applied whenever its checksum changes, after all versioned ones,
+-- in description order (so R__910 runs after R__010). Idempotent - it owns exactly the rows whose
+-- sku starts with 'GEN-', deletes them, and regenerates them; DBMS_RANDOM.SEED keeps the generated
+-- prices reproducible. Reset the local DB with
+-- `./mvnw -pl spring-boot-training -Dflyway.cleanDisabled=false flyway:clean` then `flyway:migrate`.
 
 begin
 dbms_random.seed(4242);

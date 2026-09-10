@@ -222,7 +222,10 @@ Patterns captured after user corrections. Review at session start.
 	  DDL and every `@SpringBootTest` starts from it. Pair one with each `V*` entity DDL in the same
 	  commit.
 	- **Demo bulk** `db/demo/R__9*_demo_<feature>.sql` - large, generated with Oracle
-	  `CONNECT BY LEVEL <= N` + `DBMS_RANDOM`. Opt-in only (`-Pdemo`); never in tests.
+	  `CONNECT BY LEVEL <= N` + `DBMS_RANDOM`. `db/demo` is a `<location>` on the flyway-maven-plugin (module pom), so
+	  `./mvnw flyway:migrate` applies it locally; the Testcontainers tests never see
+	  it because Boot reads `spring.flyway.locations: classpath:db/migration`. **Not** a Maven-profile
+	  toggle - see the gotcha below.
 - **Repeatable (`R__`), not versioned.** They re-run on checksum change, so the seed evolves with
   the entities without version-number juggling or `flyway:clean`. Numeric prefix in the
   description (`R__010_…`, `R__020_…`) controls their order (they run after all `V*`, alphabetically
@@ -234,11 +237,20 @@ Patterns captured after user corrections. Review at session start.
   parser needs the `/`) for reproducible values.
 - **Don't assume contiguous identity ids** when mapping generated rows to parent rows - use
   `row_number() over (order by id)` over the parent table, not `min(id) + mod(...)`.
-- **flyway-maven-plugin location switching.** The plugin's `locations` param is
-  `@Parameter(property = "flyway.locations")`. Drop `<locations>` from `<configuration>`, define a
-  `<flyway.locations>` project property as the default, and let a Maven profile (`demo`) override
-  that property to append a directory. Cleaner than trying to merge plugin `<configuration>` lists
-  across profiles.
+- **flyway-maven-plugin locations.** List every dir as a `<location>` under the plugin
+  `<configuration>/<locations>` (each `filesystem:${project.basedir}/…` on its own line, under the
+  140-col limit). A single `<flyway.locations>` CSV *property* also works but a long one-line value
+  trips the col limit, and IDEA then wraps it across lines - which the plugin rejects with
+  `No value provided for placeholder: ${flyway.locations}`. Override for a one-off with
+  `-Dflyway.locations=…` on the command line.
+- **Gotcha: never gate a *tracked* repeatable behind a conditional location.** The demo bulk was
+  first shipped as `R__910` loaded only via a `-Pdemo` Maven profile. After one `-Pdemo` run, a
+  plain `flyway:migrate` aborts: `FlywayValidateException: Detected applied migration not resolved
+  locally: 910 demo catalog` - Flyway 12's `migrate` runs `validate` first and a tracked repeatable
+  missing from the path is a **hard error**, not a warning. Fix: `db/demo` is **always** in the
+  plugin's `<locations>`; the split that matters (local vs test) is handled by Boot's separate
+  `spring.flyway.locations: classpath:db/migration`. If a dataset genuinely must be conditional,
+  make it a callback (`afterMigrate__*.sql`), which is not written to `flyway_schema_history`.
 - Tests that assert on **exact** rows still use `@Sql` with their own fixture and check their own
   marked rows - never global counts against the shared baseline.
 - **Never edit an applied `V*` migration**, not even a comment - it changes the checksum and

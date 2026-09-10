@@ -378,3 +378,13 @@ decisions - two-tier data, repeatable (`R__`) seeds, pure-SQL bulk generation.
 - Reverted a one-line comment added to `V1__create_catalog.sql` - editing an applied versioned
   migration tripped Flyway checksum validation on an already-migrated DB. The R__/V pairing note
   lives in `R__010`'s header and the docs instead. (Lesson: never touch an applied `V*` file.)
+
+Follow-up (2026-09-10): the `-Pdemo` opt-in was removed. Reason: (a) after one `-Pdemo` run a plain
+`flyway:migrate` aborts with `Detected applied migration not resolved locally: 910 demo catalog`
+(Flyway 12 `validate` treats a tracked repeatable missing from the path as a hard error), and (b)
+local dev runs the app from the IDE and wants the full dataset - only the Testcontainers tests need
+the small baseline. Now `db/demo` is a permanent `<location>` on the flyway-maven-plugin (the
+`${flyway.locations}` property was dropped - a long one-line CSV trips the 140-col limit and IDEA
+then wraps it, which the plugin rejects). `./mvnw flyway:migrate` applies both tiers; the tests
+still get baseline only via Boot's `spring.flyway.locations: classpath:db/migration`. `demo` Maven
+profile deleted; docs + lessons corrected.

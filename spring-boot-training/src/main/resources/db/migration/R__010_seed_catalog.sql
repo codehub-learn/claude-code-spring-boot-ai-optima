@@ -6,7 +6,7 @@
 --
 -- Idempotent by construction: one MERGE per table keyed on the natural key (category.name,
 -- product.sku). Identity `id` columns are never inserted; created_at / updated_at / version fall to
--- their DDL defaults. The large, local-only dataset is db/demo/R__910_demo_catalog.sql (`-Pdemo`).
+-- their DDL defaults. The large local-only dataset is db/demo/R__910_demo_catalog.sql.
 --
 -- Numeric prefix in the description ("010") orders it before R__020_seed_orders.sql (U3.2).
 

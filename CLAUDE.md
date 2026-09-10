@@ -284,8 +284,10 @@ Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>
   migration, tests) in one pass, following the structure above.
 - Sample data is two-tier and Flyway-owned. When you ship a `V*` DDL migration for a new entity, extend the paired **baseline seed** in the
   same pass: a small, idempotent repeatable script (`db/migration/R__0*_seed_<feature>.sql`, one `MERGE` per table on the natural key) that
-  every environment gets, tests included. Add **demo bulk** rows (`db/demo/R__9*_demo_<feature>.sql`, opt-in via `-Pdemo`, `CONNECT BY` +
-  `DBMS_RANDOM`) only when a feature needs volume for a demo. Tests that assert exact rows use `@Sql`, not the global seed.
+  every environment gets, tests included. Add **demo bulk** rows (`db/demo/R__9*_demo_<feature>.sql`, `CONNECT BY` + `DBMS_RANDOM`) when a
+  feature needs volume for a demo. `db/demo` is a `<location>` on the flyway-maven-plugin, so `./mvnw flyway:migrate` applies it locally; it
+  is auto-excluded from the Testcontainers tests because Boot reads `spring.flyway.locations: classpath:db/migration`. Tests that assert
+  exact rows use `@Sql`, not the global seed.
 - After any correction from the user, record the pattern in `.claude/tasks`.
 - Prefer editing existing files over adding parallel variants. Keep changes minimal and scoped.
 - Use the IntelliJ MCP (`idea` server) for build, inspection, and refactoring feedback when available.
