@@ -550,3 +550,59 @@ asserts the reloaded graph: item count, `totalAmount`, lazy nav, auditing fields
 starting at 0 then incrementing, and `orphanRemoval` deleting a line row. Every other
 `@SpringBootTest` in the module also boots the full context under `validate`, so a mapping that
 disagrees with `V1`/`V2` fails the whole build.
+
+### 3.3 Spring Data JPA — repositories & queries
+
+The query layer for the Catalog & Orders slice: four repositories (one per aggregate root —
+`Category`, `Product`, `Customer`, `Order`; `OrderItem` is reached only through `Order`), plus
+the projection and `Specification` types they return. All package-private in `catalog`, since
+the entities are. No services yet (3.4), no `@DataJpaTest` yet (3.6) — the coverage here is
+full-context `*IT` against real Oracle, matching 3.2.
+
+**One example of every query style.** `ProductRepository` is the exhibit:
+
+| Style                         | Method                                                              | Note                                                                      |
+|-------------------------------|---------------------------------------------------------------------|---------------------------------------------------------------------------|
+| Derived (name → `where`)      | `findBySku`, `existsBySku`, `findByPriceBetween`, `countByCategory` | parsed at startup; a bad name fails the context, not a call               |
+| Derived across an association | `findByCategoryNameIgnoreCase`                                      | walks `product.category.name` by property path                            |
+| Derived into an `@Embedded`   | `CustomerRepository.findByBillingAddressCountry`                    | resolves to the `country` column on `customer`                            |
+| `Sort` parameter              | `findByNameContainingIgnoreCase(fragment, Sort)`                    | ordering pushed to the DB, not sorted in memory                           |
+| `Pageable`                    | `findByCategory(Category, Pageable)`                                | runs the slice **and** a `count(*)`; use `Slice` to skip the count        |
+| `@Query` JPQL                 | `findAtOrAbove`                                                     | explicit HQL when a derived name would be unwieldy                        |
+| `@Query` native               | `findMostExpensiveInCategory`                                       | Oracle SQL for a correlated subquery; trades portability + mapping checks |
+| `@EntityGraph`                | `findAllWithCategory`                                               | fetch graph to collapse an N+1 (below)                                    |
+| `JpaSpecificationExecutor`    | `findAll(Specification, …)`                                         | dynamic `where`, see below                                                |
+
+**Three projection styles.** A projection selects only the columns it names — no entity is
+built:
+
+- **Interface (closed)** — `ProductSummary` (`getSku`/`getName`/`getPrice`). Every getter maps
+  to a property path; an *open* projection (`@Value("#{...}")`) would load the whole entity first.
+- **Record (DTO)** — `ProductPriceView`, filled by a JPQL constructor expression
+  (`select new gr.codelearn.…ProductPriceView(p.sku, p.name, c.name, p.price) …`). The
+  fully-qualified name is required — JPQL has no imports. A plain value the caller owns.
+- **Dynamic** — `findBySkuStartingWith(prefix, Class<T>)`: the same query returns `Product` or
+  `ProductSummary` depending on the `Class` argument.
+
+`OrderRepository.summariseByStatus()` shows an **aggregate** query bound to an interface
+projection: `select o.status as status, count(o) as orderCount, … group by o.status`, each
+column aliased to an `OrderStatusSummary` getter name.
+
+**Dynamic filtering with `Specification`.** `ProductSpecifications` holds one-predicate
+fragments (`nameContains`, `priceAtLeast`, `priceAtMost`, `inCategory`); an absent argument
+returns `Specification.unrestricted()` (a no-op) instead of `null`, so the caller composes the
+non-blank ones with `Specification.allOf(…)` without null checks. This is the Criteria-API
+answer to "a search form where any field may be empty" — the dynamic-query logic stays out of
+both the repository and the caller.
+
+**`@EntityGraph` and the N+1, measured.** `product.category` is `LAZY`, so looping `findAll()`
+and touching `getCategory().getName()` fires one select for the products plus one per distinct
+category. `findAllWithCategory()` attaches `@EntityGraph(attributePaths = "category")`, so
+Hibernate loads every category in the same join. `ProductRepositoryIT.entityGraphCollapsesTheNPlusOne`
+turns on Hibernate's statement counter and asserts the graph path runs **exactly one** statement
+while the lazy path runs strictly more — the teaching point is verified, not just claimed.
+
+**Verification.** `ProductRepositoryIT` (7 tests) and `OrderRepositoryIT` (4) run `@Transactional`
+against the `R__010`/`R__020` baseline (rolled back, so the shared seed is untouched); the
+`LazyInitializationException` contrast test proves what the graph buys you. `./mvnw -pl
+spring-boot-training verify` → surefire 36, failsafe 25 (+11), all green.

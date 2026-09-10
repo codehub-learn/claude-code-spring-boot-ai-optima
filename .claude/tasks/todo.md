@@ -68,7 +68,7 @@ separate and out of scope here — no AI code in this wave.
   `OrderItem` entities (Lombok `@Getter/@Setter`, `@NoArgsConstructor(PROTECTED)`, business-key
   `equals`/`hashCode`, `@Version`), `@ManyToOne` / `@OneToMany` / `@ManyToMany` join entity,
   `@Embeddable Address`, `OrderStatus` enum, JPA auditing (`@CreatedDate` / `@LastModifiedDate`).
-- [ ] **3.3 Spring Data JPA — repositories & queries** — repositories per aggregate, derived query
+- [x] **3.3 Spring Data JPA — repositories & queries** — repositories per aggregate, derived query
   methods, `@Query` JPQL + native, `Pageable` / `Sort`, `Specification` for dynamic filtering,
   `@EntityGraph` to fix N+1, interface + record (DTO) projections.
 - [ ] **3.4 Transactions** — `@Transactional` on services, propagation (`REQUIRES_NEW`), rollback
@@ -434,3 +434,42 @@ profile deleted; docs + lessons corrected.
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS (surefire 36 unchanged, failsafe 14 = +8:
   `CatalogDomainMappingIT` 4, `OrdersSeedIT` 4; `DatasourceMigrationIT` / `CatalogSeedIT` unchanged).
   All touched files reformatted via the `idea` MCP.
+
+### 3.3 Spring Data JPA — repositories & queries (done)
+
+- Four repositories in the flat `catalog` package (package-private — entities are), one per
+  aggregate root: `CategoryRepository`, `ProductRepository`, `CustomerRepository`,
+  `OrderRepository`. `OrderItem` gets none (reached only through `Order`). No pom / config /
+  migration change — Boot already scans repositories from the app package and
+  `spring-boot-starter-data-jpa` was added in 3.1.
+- `ProductRepository` carries one example of every style the checklist names: derived (`findBySku`, `existsBySku`,
+  `findByCategoryNameIgnoreCase`, `findByPriceBetween`,
+  `countByCategory`, `findByNameContainingIgnoreCase(…, Sort)`), `Pageable`
+  (`findByCategory(Category, Pageable)`), `@Query` JPQL (`findAtOrAbove`), `@Query` native Oracle
+  SQL (`findMostExpensiveInCategory`, correlated subquery), `@EntityGraph` (`findAllWithCategory`),
+  `JpaSpecificationExecutor`, and the three projections. `OrderRepository` adds
+  association-traversing derived queries, an `@EntityGraph` that loads the aggregate (`findWithCustomerAndItemsByOrderNumber`), and an
+  aggregate JPQL bound to a projection (`summariseByStatus`).
+- Projection types (package-private): `ProductSummary` (closed interface),
+  `ProductPriceView` (record / JPQL constructor expression — FQN required, JPQL has no imports),
+  `OrderStatusSummary` (interface over the aggregate tuple, each `select` alias = getter name).
+  Dynamic projection shown via `findBySkuStartingWith(prefix, Class<T>)`.
+- `ProductSpecifications`: package-private final, private ctor, static factories returning
+  `Specification<Product>`. Spring Data JPA 4.1 API check (via `javap`): `Specification` gained
+  `unrestricted()` / `allOf(...)` / `anyOf(...)` and a `PredicateSpecification` sibling;
+  `toPredicate(Root, CriteriaQuery, CriteriaBuilder)` unchanged. An absent filter arg returns
+  `Specification.unrestricted()` (no-op), never `null`, so `allOf(...)` composes without guards.
+- Tests: `catalog/ProductRepositoryIT` (7) + `catalog/OrderRepositoryIT` (4), both
+  `@Transactional` `extends AbstractOracleIntegrationTest` (the 3.2 precedent; `@DataJpaTest` is
+  reserved for 3.6). N+1 is *measured*: unwrap `SessionFactory` from the injected
+  `EntityManagerFactory`, `statistics.setStatisticsEnabled(true)`, then assert
+  `findAllWithCategory()` runs exactly 1 statement vs `findAll()` running strictly more. A
+  `LazyInitializationException` contrast test (`findByOrderNumber` + `em.clear()`) shows what the
+  graph buys. Assertions tolerant (`>=`, known SKUs) except the fixed 4-products-per-seeded-category.
+- Docs: `README.md` `### 3.3` section (query-style table, projection trio, `Specification`
+  composition, the measured N+1). No `lessons.md` entry needed — the Spring Data 4.1
+  `Specification` shape is captured here, no correction occurred.
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 36 unchanged, failsafe
+  25 = +11 (`ProductRepositoryIT` 7, `OrderRepositoryIT` 4); `CatalogDomainMappingIT` /
+  `OrdersSeedIT` / `CatalogSeedIT` / `DatasourceMigrationIT` unchanged. All touched files
+  reformatted via the `idea` MCP.
