@@ -2,7 +2,7 @@
 name: maven-scaffold
 description: |
 	Use when creating or modifying Maven pom files in this reactor: "create the parent pom", "add an aggregator / module group", "add a module / product / app", or any pom skeleton / section-order question. Provides the three pom shapes (parent, aggregator, code module), their exact section order, and the rules every pom must follow.
-version: 1.1.1
+version: 1.1.2
 author: Constantinos Giannacoulis
 ---
 
@@ -12,7 +12,7 @@ app", generate the matching skeleton below.
 
 ## Rules that apply to every pom
 
-- Tabs for indentation, CRLF, UTF-8, no final newline (`.editorconfig`); Spotless enforces.
+- Tabs for indentation, CRLF, UTF-8, no final newline (`.editorconfig`); reformat via the `idea` MCP (no Spotless).
 - `<project>` attribute order: `xmlns:xsi`, then `xmlns`, then `xsi:schemaLocation`.
 - Keep the `<!-- ... -->` banner comments and the single blank line between sections exactly as the skeletons show.
 - `<name>` is always `[${project.artifactId}]`.

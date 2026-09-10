@@ -39,20 +39,19 @@ Patterns captured after user corrections. Review at session start.
   wrong. Fixed in `pom.xml`, `spring-boot-training/pom.xml`, `CLAUDE.md`, and the `maven-scaffold`
   skill (v1.1.0).
 
-## IntelliJ auto-format diverges from Spotless
+## Formatting: IntelliJ only, no Spotless (resolved 2026-09-10)
 
-- The open IDE reformats `.java` files on open/save; its style differs from the Spotless config, which
-  caused `spotless:check` failures repeatedly.
-- **Import order (fixed 2026-09-04).** Bare `<importOrder/>` (static first, one flat group) fought
-  `.editorconfig`'s `ij_java_imports_layout = *, |, javax.**, java.**, |, $*`. The parent pom now pins
-  `<importOrder><order>,javax|java,\#</order></importOrder>` to match `.editorconfig`, so `spotless:apply`
-  and the IDE produce the same import block. `spotless:check` only fails, never edits — the two editors
-  are `spotless:apply` and IntelliJ.
-- **Still diverges: multiline arg alignment.** IJ (`ij_java_align_multiline_parameters_in_calls = true`)
-  aligns wrapped call args with `tab+space`; Spotless `<indent><tabs>` wants tabs only. Not yet
-  reconciled.
-- Always run `./mvnw spotless:apply` as the **last** step before `verify`, after any IDE has touched the
-  files. Do not trust a green build from before the file was opened in IntelliJ.
+- **Spotless is removed.** It fought IntelliJ endlessly: `ij_java_align_multiline_parameters_in_calls = true`
+  aligns wrapped call args with `tab+space`, Spotless `<indent><tabs>` forces tabs-only, and the open IDE
+  re-broke every `spotless:apply`. No Maven Java formatter implements the `ij_*` keys, so a true sync was
+  never possible. User decision: `.editorconfig` is the single source of truth; formatting is applied by
+  IntelliJ via the `idea` MCP `reformat_file` tool; there is no build-time formatting gate.
+- **Rule (CLAUDE.md → Formatting):** after creating or editing any file, reformat it through the `idea`
+  MCP before finishing. Do not hand-align continuations. If the MCP is unavailable, leave formatting to
+  the user.
+- Removed from the parent `pom.xml`: the `spotless-maven-plugin` (both `<pluginManagement>` and
+  `<plugins>` entries) and the `spotless-maven-plugin.version` property. `verify` no longer runs a
+  format check.
 
 ## Boot 4 web starter name
 

@@ -28,14 +28,23 @@ Use the Maven wrapper (`./mvnw`, or `.\mvnw.cmd` on Windows PowerShell).
 | Unit + slice tests                        | `./mvnw test`            |
 | Full verify (integration tests, coverage) | `./mvnw verify`          |
 | Run locally                               | `./mvnw spring-boot:run` |
-| Format check                              | `./mvnw spotless:check`  |
-| Apply format                              | `./mvnw spotless:apply`  |
 
 Local infrastructure (Oracle 23ai Free via `gvenzl/oracle-free:23-slim`, the `grafana/otel-lgtm` telemetry stack, etc.) runs via Docker
 Compose; start it yourself with `docker compose up -d` (the `spring-boot-docker-compose` module is not used). Grafana is at
 `http://localhost:3000`. Integration tests use Testcontainers, so they need a running Docker daemon but no manual setup.
 
-Never mark a task done until `./mvnw verify` and `spotless:check` pass.
+Never mark a task done until `./mvnw verify` passes.
+
+## Formatting
+
+`.editorconfig` is the single source of truth (tabs, 140-col lines, CRLF, UTF-8, no final newline, and the IntelliJ
+`ij_*` layout keys). There is **no build-time formatting gate** — `spotless` was removed because no Maven formatter
+can honour the `ij_*` alignment keys, only IntelliJ can.
+
+- After creating or editing any file (Java, XML/pom, SQL, YAML, …), Claude MUST reformat it through the IntelliJ MCP
+  before finishing: `idea` server, `reformat_file` tool, passing the project-relative paths it touched.
+- Do not hand-align or hand-indent to "match" — let the IDE do it. If the `idea` MCP is unavailable, say so and leave
+  formatting to the user rather than guessing.
 
 ## Maven multi-module layout
 
@@ -45,7 +54,7 @@ and **code module** (`packaging = jar`; `spring-boot-maven-plugin` only on runna
 
 Rules that apply to every pom:
 
-- Tabs for indentation, CRLF, UTF-8, no final newline (`.editorconfig`); Spotless enforces.
+- Tabs for indentation, CRLF, UTF-8, no final newline (`.editorconfig`); reformat via the `idea` MCP (see *Formatting*).
 - `<project>` attribute order: `xmlns:xsi`, then `xmlns`, then `xsi:schemaLocation`.
 - Keep the `<!-- ... -->` banner comments and the single blank line between sections exactly as the skeletons show.
 - `<name>` is always `[${project.artifactId}]`.
@@ -152,7 +161,8 @@ Rules:
 
 - Target Java 25 language features: records, pattern matching, sealed types, switch expressions, text blocks, virtual threads (enabled via
   `spring.threads.virtual.enabled=true`).
-- Respect `.editorconfig`: tabs for indentation, max line length 140, UTF-8, CRLF, no final newline. Let Spotless enforce it.
+- Respect `.editorconfig`: tabs for indentation, max line length 140, UTF-8, CRLF, no final newline. Reformat via the `idea` MCP (see
+  *Formatting*).
 - Honor JSpecify: packages are null-marked by default; annotate nullable returns/params explicitly.
 - `@Transactional` lives on service methods, not controllers or repositories. Keep transactions short; do not call AI/network inside them.
 - Prefer constructor-bound immutable collaborators and `final` fields.
@@ -208,6 +218,62 @@ Micrometer is still the internal facade; OTLP is the wire protocol; the Grafana 
 - **Prod**: the OTLP endpoint is an env var pointing at the real collector/gateway, never hardcoded.
 - **Tests**: no telemetry backend; assert with `TestObservationRegistry` where behavior matters, and cover Actuator `health` with one
   integration test.
+
+## Commit messages
+
+Conventional Commits, kept short, with two house rules: the type is `feature` (not `feat`), and the curriculum topic goes in the subject as
+`[Ux.y]`. Never commit without the user asking.
+
+- **Subject**: `type(scope) [Ux.y]: summary` — imperative mood, lowercase, no trailing period, ≤ 140 chars (aim for ~72; the hard cap is
+  140).
+	- `type` ∈ `feature` `fix` `docs` `refactor` `test` `build` `chore` `style`.
+	- `scope` = the module directory (`training`, `pom`, …); omit for repo-wide changes.
+	- `[Ux.y]` = the `docs/spring-boot-scope.md` unit/topic the commit belongs to (e.g. `[U3.2]`), placed after the scope (or after the type
+	  when there is no scope). Omit the bracket entirely when the commit does not map to a curriculum topic.
+- **Body** (optional): only when the *why* is not obvious from the subject. A few `-` bullets, one line each, do not wrap — what changed and
+  why, not a narration of every file. No essays.
+- **Breaking change**: `!` immediately before the colon — `type(scope) [Ux.y]!: summary` (or `type(scope)!: summary` with no bracket) — plus
+  a `BREAKING CHANGE: <what + migration>` trailer.
+- **Trailer**: every commit ends with `Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>`. Do **not** add
+  `Co-Authored-By` or other AI-attribution trailers.
+
+**Before every commit (a fresh commit or `git commit --amend` on `HEAD`), Claude MUST:**
+
+1. Ask the user whether to run `./mvnw verify` first. Run it only if they say yes; if it fails, stop and report — do not commit.
+2. Show the user the full proposed commit message and wait — the user edits or approves it before it is used; never pass an unreviewed
+   message to `git commit`.
+3. Handle tags:
+	- **New commit**: ask whether to tag it. If yes, ask for the exact tag (and, if wanted, a tag message), then create it with `git tag`.
+	- **Amending `HEAD`**: list the tag (s) currently on it (`git tag --points-at HEAD`) and ask, per tag, whether to move it to the amended
+	  commit (`git tag -f`), leave it, or delete it — the amend changes the SHA, so never silently leave a tag on the old commit. If an
+	  affected tag was already pushed, confirm the force-push first.
+
+Only `HEAD` is amended this way. Rewording an older commit (interactive rebase) is a manual operation the user drives.
+
+```
+feature(training) [U3.2]: two-tier Flyway seed data for the catalog
+
+- add repeatable baseline seed R__010_seed_catalog.sql (idempotent MERGE, 6 categories + 24 products); runs in db/migration, tests included
+- add demo bulk R__910_demo_catalog.sql (~500 rows), opt-in via -Pdemo
+- drive flyway-maven-plugin locations from ${flyway.locations}; add demo profile
+- add CatalogSeedIT; document in README and CLAUDE.md
+
+Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>
+```
+
+```
+fix(training): quote flyway_schema_history identifiers for Oracle
+
+Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>
+```
+
+```
+refactor(training) [U4.2]!: rename app.catalog.* to app.catalog.paging.*
+
+BREAKING CHANGE: `app.catalog.default-page-size` / `max-page-size` move under `app.catalog.paging.*`. Update application-*.yml overrides.
+
+Signed-off-by: Constantinos Giannacoulis <c.giannacoulis@codehub.gr>
+```
 
 ## Working agreement for Claude Code
 

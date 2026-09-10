@@ -51,7 +51,6 @@
 
 		<!-- Maven plugins (versions not managed by Spring Boot) -->
 		<jacoco-maven-plugin.version>0.8.13</jacoco-maven-plugin.version>
-		<spotless-maven-plugin.version>2.44.5</spotless-maven-plugin.version>
 
 		<!-- Base args for the test JVM. jacoco's prepare-agent appends its -javaagent to this
 		     property; surefire then consumes it via @{argLine}. -Xshare:off silences the CDS
@@ -136,36 +135,6 @@
 					</configuration>
 				</plugin>
 
-				<!-- spotless-maven-plugin: formatting gate, aligned with .editorconfig -->
-				<plugin>
-					<groupId>com.diffplug.spotless</groupId>
-					<artifactId>spotless-maven-plugin</artifactId>
-					<version>${spotless-maven-plugin.version}</version>
-					<configuration>
-						<java>
-							<importOrder>
-								<order>,javax|java,\#</order>
-							</importOrder>
-							<removeUnusedImports/>
-							<formatAnnotations/>
-							<trimTrailingWhitespace/>
-							<indent>
-								<tabs>true</tabs>
-								<spacesPerTab>4</spacesPerTab>
-							</indent>
-						</java>
-					</configuration>
-					<executions>
-						<execution>
-							<id>spotless-check</id>
-							<phase>verify</phase>
-							<goals>
-								<goal>check</goal>
-							</goals>
-						</execution>
-					</executions>
-				</plugin>
-
 				<!-- jacoco-maven-plugin: coverage instrumentation and report on verify -->
 				<plugin>
 					<groupId>org.jacoco</groupId>
@@ -224,10 +193,6 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
-			</plugin>
-			<plugin>
-				<groupId>com.diffplug.spotless</groupId>
-				<artifactId>spotless-maven-plugin</artifactId>
 			</plugin>
 			<plugin>
 				<groupId>org.jacoco</groupId>

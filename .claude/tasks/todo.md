@@ -102,7 +102,7 @@ separate and out of scope here — no AI code in this wave.
 
 ## Definition of done (per topic and overall)
 
-- `./mvnw verify` and `./mvnw spotless:check` pass.
+- `./mvnw verify` passes; touched files reformatted via the `idea` MCP (no Spotless — see lessons.md).
 - Every REST endpoint: validated input, documented response, explicit status, one slice test,
   one happy-path IT, one failure-path test.
 - Code follows CLAUDE.md conventions (records vs Lombok, package-by-feature, constructor injection,

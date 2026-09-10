@@ -74,8 +74,8 @@ module with `-pl spring-boot-training`, and its upstream modules too with `-am`.
 declared without a `<version>`. The reactor parent is `spring-boot-starter-parent`, which
 imports the Spring Boot BOM; that BOM pins every managed coordinate (and the versions of
 common plugins, including `spring-boot-maven-plugin` and `git-commit-id-maven-plugin`).
-Only unmanaged things (`mapstruct`, `spotless`, `jacoco`) carry an explicit `*.version`
-property in the parent.
+Only unmanaged things (`mapstruct`, `jacoco`) carry an explicit `*.version` property in the
+parent.
 
 **`spring-boot:run`** launches the app in place, no packaging step:
 
