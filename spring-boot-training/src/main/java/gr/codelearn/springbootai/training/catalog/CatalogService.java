@@ -3,6 +3,7 @@ package gr.codelearn.springbootai.training.catalog;
 import gr.codelearn.springbootai.training.catalog.dto.CategoryRequest;
 import gr.codelearn.springbootai.training.catalog.dto.CategoryResponse;
 import gr.codelearn.springbootai.training.catalog.dto.ProductFilter;
+import gr.codelearn.springbootai.training.catalog.dto.ProductPatchRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductResponse;
 import gr.codelearn.springbootai.training.catalog.internal.CatalogDuplicateException;
@@ -95,6 +96,30 @@ public class CatalogService {
 		product.setDescription(request.description());
 		product.setPrice(request.price());
 		product.setCategory(requireCategory(request.categoryName()));
+		return mapper.toResponse(productRepository.save(product));
+	}
+
+	/**
+	 * Applies only the non-null fields of {@code request} (U4.3's partial-update DTO) — a {@code null} field means "leave this one alone",
+	 * not "clear it". See {@link ProductPatchRequest}'s Javadoc for why that also means it can never null out
+	 * {@link Product#getDescription()} once set.
+	 */
+	@Transactional
+	public ProductResponse patchProduct(final String sku, final ProductPatchRequest request) {
+		final Product product = productRepository.findBySku(sku)
+												 .orElseThrow(() -> new NotFoundException("No product with sku " + sku));
+		if (request.name() != null) {
+			product.setName(request.name());
+		}
+		if (request.description() != null) {
+			product.setDescription(request.description());
+		}
+		if (request.price() != null) {
+			product.setPrice(request.price());
+		}
+		if (request.categoryName() != null) {
+			product.setCategory(requireCategory(request.categoryName()));
+		}
 		return mapper.toResponse(productRepository.save(product));
 	}
 

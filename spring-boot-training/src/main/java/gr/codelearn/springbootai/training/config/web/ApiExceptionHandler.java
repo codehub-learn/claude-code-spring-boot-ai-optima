@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.method.ParameterErrors;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -31,10 +32,13 @@ import java.util.Map;
  * machine-readable {@code errors} extension:
  *
  * <ul>
- *   <li>a {@code @Valid} request body failure throws {@link MethodArgumentNotValidException};</li>
+ *   <li>a {@code @Valid} request body failure throws {@link MethodArgumentNotValidException} — <b>unless</b> the same method also has a
+ *       directly-constrained parameter (see the next bullet), in which case it throws the type below instead.</li>
  *   <li>a {@code @Validated} path-variable / request-param failure throws {@link HandlerMethodValidationException} — <b>not</b>
  *       {@code ConstraintViolationException} (that type is what {@code jakarta.validation.Validator} throws directly; Spring MVC 6.1+
- *       wraps controller-method parameter violations in its own type instead, a common trap when porting older examples).</li>
+ *       wraps controller-method parameter violations in its own type instead, a common trap when porting older examples). U4.3 found
+ *       that a method combining this with a cascaded {@code @Valid} body (e.g. {@code patchProduct}) reports the body's failures
+ *       through this same exception too — {@link #handleHandlerMethodValidationException} unwraps both shapes.</li>
  * </ul>
  */
 @RestControllerAdvice
@@ -63,18 +67,33 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		return withErrors(super.handleMethodArgumentNotValid(ex, headers, status, request), errors);
 	}
 
+	/**
+	 * A method mixing a directly-constrained parameter (a {@code @NotBlank @PathVariable}, say) with a cascaded {@code @Valid}/
+	 * {@code @Validated} {@code @RequestBody} — every endpoint here that takes both, e.g. {@code patchProduct} — routes <b>both</b> kinds
+	 * of failure through this one exception, not just the path/query one. Each
+	 * {@link org.springframework.validation.method .ParameterValidationResult} is either a plain scalar violation (no per-field path — the
+	 * parameter name itself, e.g. {@code "sku"}, is the most specific field there is) or a {@link ParameterErrors} — the subtype Spring
+	 * uses for a cascaded object argument, which is itself a Spring {@code Errors} and carries real {@link FieldError}s ({@code "price"},
+	 * not the parameter name {@code "request"}). Caught by {@code CatalogControllerTest.patchProductWithANonPositivePriceReturns400}
+	 * expecting {@code price} and getting {@code request} before this handled the two cases separately.
+	 */
 	@Override
 	protected ResponseEntity<Object> handleHandlerMethodValidationException(final HandlerMethodValidationException ex,
 																			final HttpHeaders headers, final HttpStatusCode status,
 																			final WebRequest request) {
 		final List<Map<String, String>> errors = ex.getParameterValidationResults()
 												   .stream()
-												   .flatMap(result -> result.getResolvableErrors()
-																			.stream()
-																			.map(error -> Map.of(
-																					"field",
-																					result.getMethodParameter().getParameterName(),
-																					"message", String.valueOf(error.getDefaultMessage()))))
+												   .flatMap(result -> result instanceof final ParameterErrors cascaded
+																	  ? cascaded.getFieldErrors()
+		                                                                        .stream()
+		                                                                        .map(ApiExceptionHandler::toErrorEntry)
+																	  : result.getResolvableErrors()
+																			  .stream()
+																			  .map(error -> Map.of(
+																					  "field",
+				                                                                      result.getMethodParameter().getParameterName(),
+																					  "message",
+				                                                                      String.valueOf(error.getDefaultMessage()))))
 												   .toList();
 		return withErrors(super.handleHandlerMethodValidationException(ex, headers, status, request), errors);
 	}

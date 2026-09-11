@@ -1,6 +1,9 @@
 package gr.codelearn.springbootai.training.order;
 
 import gr.codelearn.springbootai.training.common.NotFoundException;
+import gr.codelearn.springbootai.training.order.dto.AddressResponse;
+import gr.codelearn.springbootai.training.order.dto.OrderDetailResponse;
+import gr.codelearn.springbootai.training.order.dto.OrderLineResponse;
 import gr.codelearn.springbootai.training.order.internal.OrderConfirmation;
 import gr.codelearn.springbootai.training.order.mapper.OrderWebMapper;
 
@@ -17,14 +20,17 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 /**
- * U4.1/U4.2 slice test for {@link OrderController}. The real {@link OrderWebMapper} is imported (it is a plain record→record converter);
- * {@link OrderService} is mocked. Covers {@code POST → 201 + Location}, read-back, the {@code PATCH} status transition, the {@code 404}
+ * U4.1/U4.2/U4.3 slice test for {@link OrderController}. The real {@link OrderWebMapper} is imported (it is a plain record→record
+ * converter); {@link OrderService} is mocked. Covers {@code POST → 201 + Location}, read-back (both the {@code Views.Summary} shape common
+ * to place/list/patch-status and the {@code Views.Detail} shape unique to get-one), the {@code PATCH} status transition, the {@code 404}
  * failure path, a malformed body → {@code 400}, and (U4.2) a {@code @Valid} nested-body failure and an invalid {@code @Email} query param.
  */
 @WebMvcTest(controllers = OrderController.class,
@@ -40,6 +46,14 @@ class OrderControllerTest {
 
 	private static OrderConfirmation confirmation(final OrderStatus status) {
 		return new OrderConfirmation("API-1", status, new BigDecimal("1299.00"), 1);
+	}
+
+	private static OrderDetailResponse detail(final OrderStatus status) {
+		final AddressResponse address = new AddressResponse("1 Way", null, "Town", "00001", "US");
+		final List<OrderLineResponse> lines = List.of(
+				new OrderLineResponse("LAP-0001", "Latitude 14 Ultralight", 1, new BigDecimal("1299.00"), new BigDecimal("1299.00")));
+		return new OrderDetailResponse(
+				"API-1", status, new BigDecimal("1299.00"), 1, "alice@example.com", OffsetDateTime.now(), address, lines);
 	}
 
 	private static final String PLACE_BODY = """
@@ -58,23 +72,44 @@ class OrderControllerTest {
 	}
 
 	@Test
-	void getOrderReturns200() {
-		given(orderService.findOrder("API-1")).willReturn(confirmation(OrderStatus.NEW));
+	void placeOrderResponseIsTheSummaryViewOnly() {
+		// @JsonView(Views.Summary.class): total serializes as "totalAmount" (@JsonProperty), and the Views.Detail-only fields
+		// (lines, shippingAddress, customerEmail, placedAt) never appear, even though OrderWebMapper.toResponse leaves them
+		// null/empty rather than omitting them from the record.
+		given(orderService.placeOrder(any())).willReturn(confirmation(OrderStatus.NEW));
+
+		assertThat(mvc.post().uri("/api/v1/orders").contentType(MediaType.APPLICATION_JSON).content(PLACE_BODY))
+				.bodyJson()
+				.hasPath("$.totalAmount")
+				.doesNotHavePath("$.total")
+				.doesNotHavePath("$.lines")
+				.doesNotHavePath("$.shippingAddress")
+				.doesNotHavePath("$.customerEmail");
+	}
+
+	@Test
+	void getOrderReturnsTheDetailViewWithNestedLinesAndAddress() {
+		given(orderService.getOrderDetail("API-1")).willReturn(detail(OrderStatus.NEW));
 
 		assertThat(mvc.get().uri("/api/v1/orders/{n}", "API-1"))
 				.hasStatusOk()
-				.bodyJson().extractingPath("$.status").isEqualTo("NEW");
+				.bodyJson()
+				.extractingPath("$.status").isEqualTo("NEW");
+		assertThat(mvc.get().uri("/api/v1/orders/{n}", "API-1"))
+				.bodyJson().extractingPath("$.lines[0].sku").isEqualTo("LAP-0001");
+		assertThat(mvc.get().uri("/api/v1/orders/{n}", "API-1"))
+				.bodyJson().extractingPath("$.shippingAddress.city").isEqualTo("Town");
 	}
 
 	@Test
 	void getUnknownOrderReturns404() {
-		given(orderService.findOrder("NOPE")).willThrow(new NotFoundException("No order NOPE"));
+		given(orderService.getOrderDetail("NOPE")).willThrow(new NotFoundException("No order NOPE"));
 
 		assertThat(mvc.get().uri("/api/v1/orders/{n}", "NOPE")).hasStatus(HttpStatus.NOT_FOUND);
 	}
 
 	@Test
-	void patchStatusReturns200WithTheNewStatus() {
+	void patchStatusReturns200WithTheNewStatusAndNoDetailFields() {
 		given(orderService.updateStatus("API-1", OrderStatus.PAID)).willReturn(confirmation(OrderStatus.PAID));
 
 		assertThat(mvc.patch().uri("/api/v1/orders/{n}/status", "API-1")
@@ -82,7 +117,13 @@ class OrderControllerTest {
 					  .content("""
 							   {"status":"PAID"}"""))
 				.hasStatusOk()
-				.bodyJson().extractingPath("$.status").isEqualTo("PAID");
+				.bodyJson()
+				.extractingPath("$.status").isEqualTo("PAID");
+		assertThat(mvc.patch().uri("/api/v1/orders/{n}/status", "API-1")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							   {"status":"PAID"}"""))
+				.bodyJson().doesNotHavePath("$.lines");
 	}
 
 	@Test

@@ -50,10 +50,19 @@ class OrderApiIT extends AbstractOracleIntegrationTest {
 		assertThat(mvc.post().uri("/api/v1/orders").contentType(MediaType.APPLICATION_JSON).content(placeBody()))
 				.hasStatus(HttpStatus.CREATED)
 				.hasHeader("Location", "http://localhost/api/v1/orders/" + orderNumber);
+		// POST answers the Views.Summary shape (U4.3): "totalAmount", not the nested detail fields.
+		assertThat(mvc.post().uri("/api/v1/orders").contentType(MediaType.APPLICATION_JSON)
+					  .content(placeBody().replace(orderNumber, orderNumber + "-B")))
+				.bodyJson().hasPath("$.totalAmount").doesNotHavePath("$.lines");
 
 		assertThat(mvc.get().uri("/api/v1/orders/{n}", orderNumber))
 				.hasStatusOk()
 				.bodyJson().extractingPath("$.status").isEqualTo("NEW");
+		// GET-by-number answers the Views.Detail shape: the line placed above, nested, plus the shipping address.
+		assertThat(mvc.get().uri("/api/v1/orders/{n}", orderNumber))
+				.bodyJson().extractingPath("$.lines[0].sku").isEqualTo("LAP-0001");
+		assertThat(mvc.get().uri("/api/v1/orders/{n}", orderNumber))
+				.bodyJson().extractingPath("$.shippingAddress.city").isEqualTo("Testville");
 
 		assertThat(mvc.patch().uri("/api/v1/orders/{n}/status", orderNumber)
 					  .contentType(MediaType.APPLICATION_JSON)

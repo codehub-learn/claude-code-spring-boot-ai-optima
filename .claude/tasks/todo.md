@@ -90,7 +90,7 @@ separate and out of scope here — no AI code in this wave.
   `@Validated` on path/query params and on `AppProperties`, validation groups for create vs
   update, central `@RestControllerAdvice` returning RFC 9457 `ProblemDetail`, domain exceptions (`ProductNotFoundException`, etc.) →
   `ProblemDetail` in one place.
-- [ ] **4.3 DTOs** — `*Request` / `*Response` records per resource, no entity leakage, nested DTOs
+- [x] **4.3 DTOs** — `*Request` / `*Response` records per resource, no entity leakage, nested DTOs
   for `Order` + `OrderItem`, Jackson 3 shaping (`@JsonProperty`, naming strategy, `@JsonView`
   for list vs detail), a partial-update (PATCH) payload approach.
 - [ ] **4.4 Request / Response mapping** — MapStruct mappers (`componentModel = "spring"`),
@@ -783,3 +783,49 @@ the feature root; only `dto/`, `mapper/`, `internal/` as sub-packages. `CatalogC
 again. `common/` and the two-feature split stand. Tests flattened to match (`OrderTransactionSemanticsIT` stays
 in `order.internal` — it autowires package-private `OrderNotifications`). `@EnableJpaRepositories`
 unchanged. `./mvnw -pl spring-boot-training verify` green. README follow-up subsection rewritten.
+
+### 4.3 DTOs (done)
+
+- **One order response type, `@JsonView` picks the shape.** `order/dto/OrderResponse.java` (flat) replaced by
+  `OrderDetailResponse`, used by every order endpoint. New `order/dto/Views` (`Summary`, `Detail extends Summary`) tags each field;
+  `OrderController` puts `@JsonView(Views.Summary.class)` on `placeOrder`/`listOrders`/`updateStatus` and
+  `@JsonView(Views.Detail.class)` on `getOrder` — Spring MVC's built-in `JsonViewResponseBodyAdvice`, no manual `MappingJacksonValue`.
+  New nested `order/dto/OrderLineResponse` + `order/dto/AddressResponse`.
+- `OrderWebMapper.toResponse(OrderConfirmation)` (place/list/patch-status) fills only the `Views.Summary` fields, leaving the four
+  `Views.Detail` ones `null`/empty — harmless under a `Views.Summary`-filtered response. New `toDetailResponse(Order)` (get-by-number)
+  fills everything from the aggregate, loaded via new `OrderRepository.findWithCustomerItemsAndProductsByOrderNumber`
+  (`@EntityGraph` on `customer`, `items`, `items.product`). `OrderService` gained `getOrderDetail(orderNumber)`; `OrderWebMapper` is now
+  an `OrderService` constructor dependency (Spring-wired, no test changes needed for that alone).
+- **Gotcha (lessons.md): `@JsonView` doesn't cascade to nested types.** `MapperFeature.DEFAULT_VIEW_INCLUSION` defaults to `false` and
+  applies to every type touched during a view-filtered serialization, not just the root — `AddressResponse`/`OrderLineResponse` with no
+  `@JsonView` on their own fields serialized as empty `{}` under the detail endpoint. Fixed by tagging every field of both
+  `@JsonView(Views.Detail.class)`. Caught by `OrderControllerTest` asserting an actual nested field, not just the container key.
+- **`@JsonProperty`**: `OrderDetailResponse.total` → wire name `totalAmount`. **Naming strategy, scoped not global**:
+  `catalog/dto/ProductResponse` gets `@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)` → `category_name`; chosen per-class
+  over `spring.jackson.property-naming-strategy` so it doesn't reshape every other already-documented DTO contract.
+- **Jackson 3 package split (lessons.md), verified against the `~/.m2` jars**: `jackson-annotations` stayed on
+  `com.fasterxml.jackson.annotation.*` (2.x artifact) — `@JsonProperty`/`@JsonView` unchanged. `jackson-databind` relocated to
+  `tools.jackson.databind.*` (3.x artifact) — `PropertyNamingStrategies`/`@JsonNaming` moved.
+- **Partial-update PATCH**: new `PATCH /api/v1/products/{sku}` + `catalog/dto/ProductPatchRequest` (every field `@Nullable`);
+  `CatalogService.patchProduct` applies only the non-null ones. No validation groups needed — Jakarta Bean Validation already treats
+  `null` as valid except for `@NotNull`/`@NotBlank`/`@NotEmpty`. Documented, not worked around: a plain record can't tell "field absent"
+  from `"field": null` apart, so this PATCH can never clear `description` back to `null` (RFC 7396 JSON Merge Patch / RFC 6902 JSON
+  Patch are the correct tools for that, deliberately out of scope).
+- **Gotcha (lessons.md): a validated body sharing a method with a directly-constrained parameter reports the wrong field name.**
+  `patchProduct` was the first endpoint combining a `@NotBlank @PathVariable` with a `@Valid @RequestBody` on the same method
+  (`replaceProduct` does too, but nothing had exercised its body-validation failure path before). That combination routes the body's
+  cascaded violations through `HandlerMethodValidationException`, not `MethodArgumentNotValidException` — `ApiExceptionHandler` read
+  every `ParameterValidationResult` as a flat scalar violation, reporting the bare parameter name (`"request"`) instead of the real
+  field (`"price"`). Fixed: check for `org.springframework.validation.method.ParameterErrors` (the subtype Spring uses for a cascaded
+  object argument, itself a Spring `Errors` with real `FieldError`s) and read `getFieldErrors()` from it, same as the
+  `MethodArgumentNotValidException` path. Caught by `CatalogControllerTest.patchProductWithANonPositivePriceReturns400`; a new
+  `invalidReplaceBodyReturns400WithFieldErrorsNotTheParameterName` regression test closes the same pre-existing gap on `replaceProduct`.
+- Tests: `CatalogControllerTest` +4 (PATCH happy path, PATCH validation failure, PATCH unknown SKU, the `replaceProduct` regression
+  test), `OrderControllerTest` +1 new / 1 renamed (Summary-view field-exclusion proof; Detail-view nested assertions on the renamed
+  get-order test). `CatalogApiIT` +2 (PATCH round-trip, PATCH validation failure). `OrderApiIT`'s lifecycle test extended in place with
+  Summary/Detail assertions.
+- Docs: `README.md` new `### 4.3 DTOs` section + the 4.1 endpoint table's PATCH row and `OrderResponse` → `OrderDetailResponse`
+  references corrected. `lessons.md`: the three gotchas above (Jackson 3 package split, `@JsonView` non-cascading to nested types, the
+  mixed-parameter validation-exception routing).
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 67 (+5), failsafe 61 (+2); all prior tests unchanged. All touched
+  files reformatted via the `idea` MCP.

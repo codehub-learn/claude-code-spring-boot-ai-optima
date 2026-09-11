@@ -796,21 +796,22 @@ order lines, PATCH bodies) and U4.4 moves the mapping to MapStruct. Bean Validat
 
 **Endpoints.**
 
-| Verb + path                                 | Binding                                                        | Success                             | Failure                        |
-|---------------------------------------------|----------------------------------------------------------------|-------------------------------------|--------------------------------|
-| `GET /api/v1/products`                      | `ProductFilter` + `Pageable` query params (`@ParameterObject`) | `200` `PagedModel<ProductResponse>` | —                              |
-| `GET /api/v1/products/{sku}`                | `@PathVariable`                                                | `200`                               | `404`                          |
-| `POST /api/v1/products`                     | `@RequestBody ProductRequest` (`OnCreate` group)                | `201` + `Location`                  | `400` invalid, `409` duplicate sku |
-| `PUT /api/v1/products/{sku}`                | path + `ProductRequest` (`OnUpdate` group)                     | `200`                               | `400` invalid, `404`           |
-| `DELETE /api/v1/products/{sku}`             | `@PathVariable`                                                | `204`                               | `404`                          |
-| `GET /api/v1/categories`                    | —                                                              | `200` `List<CategoryResponse>`      | —                              |
-| `GET /api/v1/categories/{name}`             | `@PathVariable`                                                | `200`                               | `404`                          |
-| `POST /api/v1/categories`                   | `@RequestBody CategoryRequest` (`OnCreate` group)              | `201` + `Location`                  | `400` invalid, `409`           |
-| `PUT /api/v1/categories/{name}`             | path + `CategoryRequest` (`OnUpdate` group)                    | `200`                               | `400` invalid, `404`           |
-| `POST /api/v1/orders`                       | `@RequestBody PlaceOrderRequest`                               | `201` + `Location`                  | `404` unknown customer/product |
-| `GET /api/v1/orders/{orderNumber}`          | `@PathVariable`                                                | `200`                               | `404`                          |
-| `GET /api/v1/orders`                        | `?customerEmail=&status=` (`@RequestParam`)                    | `200` `List<OrderResponse>`         | —                              |
-| `PATCH /api/v1/orders/{orderNumber}/status` | path + `UpdateOrderStatusRequest`                              | `200`                               | `404`                          |
+| Verb + path                                 | Binding                                                        | Success                                                                 | Failure                            |
+|---------------------------------------------|----------------------------------------------------------------|-------------------------------------------------------------------------|------------------------------------|
+| `GET /api/v1/products`                      | `ProductFilter` + `Pageable` query params (`@ParameterObject`) | `200` `PagedModel<ProductResponse>`                                     | —                                  |
+| `GET /api/v1/products/{sku}`                | `@PathVariable`                                                | `200`                                                                   | `404`                              |
+| `POST /api/v1/products`                     | `@RequestBody ProductRequest` (`OnCreate` group)               | `201` + `Location`                                                      | `400` invalid, `409` duplicate sku |
+| `PUT /api/v1/products/{sku}`                | path + `ProductRequest` (`OnUpdate` group)                     | `200`                                                                   | `400` invalid, `404`               |
+| `PATCH /api/v1/products/{sku}`              | path + `ProductPatchRequest` (all fields optional, U4.3)       | `200`                                                                   | `400` invalid, `404`               |
+| `DELETE /api/v1/products/{sku}`             | `@PathVariable`                                                | `204`                                                                   | `404`                              |
+| `GET /api/v1/categories`                    | —                                                              | `200` `List<CategoryResponse>`                                          | —                                  |
+| `GET /api/v1/categories/{name}`             | `@PathVariable`                                                | `200`                                                                   | `404`                              |
+| `POST /api/v1/categories`                   | `@RequestBody CategoryRequest` (`OnCreate` group)              | `201` + `Location`                                                      | `400` invalid, `409`               |
+| `PUT /api/v1/categories/{name}`             | path + `CategoryRequest` (`OnUpdate` group)                    | `200`                                                                   | `400` invalid, `404`               |
+| `POST /api/v1/orders`                       | `@RequestBody PlaceOrderRequest`                               | `201` + `Location`                                                      | `404` unknown customer/product     |
+| `GET /api/v1/orders/{orderNumber}`          | `@PathVariable`                                                | `200` `OrderDetailResponse` (Detail view, nested lines + address, U4.3) | `404`                              |
+| `GET /api/v1/orders`                        | `?customerEmail=&status=` (`@RequestParam`)                    | `200` `List<OrderDetailResponse>` (Summary view, U4.3)                  | —                                  |
+| `PATCH /api/v1/orders/{orderNumber}/status` | path + `UpdateOrderStatusRequest`                              | `200`                                                                   | `404`                              |
 
 Controllers only bind, delegate, and shape the `ResponseEntity` — no repository, no entity, no
 `@Transactional`. `ResponseEntity.created(uri)` / `.noContent()` for the `201`/`204` cases; the
@@ -881,8 +882,7 @@ feature's package root, with only `dto/`, `mapper/` and `internal/` as sub-packa
 cannot see a package-private sibling of its parent, so any layered split (`domain/`, `repository/`,
 `web/`, …) forces almost every type to be `public` and turns `internal/` into a naming convention
 with no enforcement. Flat keeps `CatalogController` / `OrderController`, `OrderNotifications` and
-the projections genuinely package-private. Real boundary enforcement would need Spring Modulith
-(a `verify()` test) — deferred.
+the projections genuinely package-private. Real boundary enforcement would need Spring Modulith (a `verify()` test) — deferred.
 
 `order` keeps one documented, one-way dependency on `catalog`: `OrderItem` holds a
 `@ManyToOne Product` and `OrderFactory` reads `ProductRepository` to price a line at order time.
@@ -897,13 +897,13 @@ Validation everywhere a request enters the API: request bodies, path variables, 
 **Central error handling.** New `config.web.ApiExceptionHandler extends ResponseEntityExceptionHandler`,
 `@RestControllerAdvice`, the one place any exception becomes an RFC 9457 `ProblemDetail`:
 
-| Thrown by                                                      | `@ExceptionHandler`                        | Status |
-|-----------------------------------------------------------------|--------------------------------------------|--------|
-| `NotFoundException`                                              | direct                                     | `404`  |
-| `CatalogDuplicateException`                                      | direct                                     | `409`  |
-| `MethodArgumentNotValidException` (a `@Valid` body failure)      | overrides the `ResponseEntityExceptionHandler` method | `400`  |
-| `HandlerMethodValidationException` (a `@Validated` param failure)| overrides the `ResponseEntityExceptionHandler` method | `400`  |
-| anything else                                                    | catch-all, logged at ERROR                 | `500`  |
+| Thrown by                                                         | `@ExceptionHandler`                                   | Status |
+|-------------------------------------------------------------------|-------------------------------------------------------|--------|
+| `NotFoundException`                                               | direct                                                | `404`  |
+| `CatalogDuplicateException`                                       | direct                                                | `409`  |
+| `MethodArgumentNotValidException` (a `@Valid` body failure)       | overrides the `ResponseEntityExceptionHandler` method | `400`  |
+| `HandlerMethodValidationException` (a `@Validated` param failure) | overrides the `ResponseEntityExceptionHandler` method | `400`  |
+| anything else                                                     | catch-all, logged at ERROR                            | `500`  |
 
 The two validation overrides attach an `errors` extension to the `ProblemDetail` — a JSON array of
 `{"field": ..., "message": ...}` built from `BindingResult.getFieldErrors()` (body) or
@@ -915,8 +915,8 @@ cascaded nested-body violation report the same shape, e.g. `shippingAddress.line
 `@RequestBody` failure throws `MethodArgumentNotValidException`, unchanged since Spring 6. A
 `@Validated`/constrained `@PathVariable` or `@RequestParam` failure throws
 `HandlerMethodValidationException` — **not** `jakarta.validation.ConstraintViolationException`,
-which is what `jakarta.validation.Validator` throws directly and what older Spring examples
-(pre-6.1) show catching. `ApiExceptionHandler` only handles the newer type.
+which is what `jakarta.validation.Validator` throws directly and what older Spring examples (pre-6.1) show catching. `ApiExceptionHandler`
+only handles the newer type.
 
 **Do not add class-level `@Validated` to a controller just to validate its `@PathVariable`s.**
 Spring MVC validates a constrained `@PathVariable`/`@RequestParam` natively since Framework 6.1,
@@ -937,13 +937,16 @@ near-identical records, they were merged into one `ProductRequest`, with `sku` r
 
 ```java
 public record ProductRequest(
-        @NotBlank(groups = OnCreate.class) String sku,
-        @NotBlank String name,
-        @Nullable String description,
-        @Positive BigDecimal price,
-        @NotBlank String categoryName) {
-    public interface OnCreate extends Default {}
-    public interface OnUpdate extends Default {}
+		@NotBlank(groups = OnCreate.class) String sku,
+		@NotBlank String name,
+		@Nullable String description,
+		@Positive BigDecimal price,
+		@NotBlank String categoryName) {
+	public interface OnCreate extends Default {
+	}
+
+	public interface OnUpdate extends Default {
+	}
 }
 ```
 
@@ -983,3 +986,123 @@ address, invalid `@Email` filter). New IT cases: `CatalogApiIT` / `OrderApiIT` (
 `./mvnw -pl spring-boot-training verify` → surefire 62 (+3 for the category follow-up:
 `replaceCategoryReturns200`, `replaceUnknownCategoryReturns404`, `invalidCreateCategoryBodyReturns400WithFieldErrors`),
 failsafe 59 (+1: `createThenReplaceCategoryRoundTrips`), BUILD SUCCESS.
+
+### 4.3 DTOs
+
+The wire contracts were already `*Request`/`*Response` records with no entity leakage (U4.1/U4.2).
+This step adds the three things still missing: nested response DTOs for `Order`/`OrderItem`,
+Jackson 3 shaping (`@JsonProperty`, a naming strategy, `@JsonView`), and a genuine partial-update
+PATCH — `PATCH .../status` was always a single mandatory field, not "some fields provided, others
+left alone".
+
+**One response type, `@JsonView` picks the shape.** `order.dto.OrderResponse` (flat: `orderNumber`,
+`status`, `total`, `lineCount`) is replaced by `OrderDetailResponse`, used by *every* order
+endpoint. A `Views` holder (`Views.Summary`, `Views.Detail extends Summary`) tags each field;
+`OrderController` puts `@JsonView(Views.Summary.class)` on `placeOrder`/`listOrders`/`updateStatus`
+and `@JsonView(Views.Detail.class)` on `getOrder` — Spring MVC's built-in
+`JsonViewResponseBodyAdvice` applies the filter directly from the handler-method annotation, no
+manual `MappingJacksonValue` wrapping. One record, not two unrelated DTOs:
+
+```java
+public record OrderDetailResponse(
+        @JsonView(Views.Summary.class) String orderNumber,
+        @JsonView(Views.Summary.class) OrderStatus status,
+        @JsonView(Views.Summary.class) @JsonProperty("totalAmount") BigDecimal total,
+        @JsonView(Views.Summary.class) int lineCount,
+        @JsonView(Views.Detail.class) @Nullable String customerEmail,
+        @JsonView(Views.Detail.class) @Nullable OffsetDateTime placedAt,
+        @JsonView(Views.Detail.class) @Nullable AddressResponse shippingAddress,
+        @JsonView(Views.Detail.class) List<OrderLineResponse> lines) {}
+```
+
+`OrderWebMapper.toResponse(OrderConfirmation)` (place/list/patch-status) only has the flat
+confirmation to work with, so the four `Views.Detail` fields come back `null`/empty — harmless,
+since a `Views.Summary`-filtered response never serializes them regardless of value.
+`toDetailResponse(Order)` (get-by-number) has the whole aggregate — loaded via the new
+`OrderRepository.findWithCustomerItemsAndProductsByOrderNumber` (`@EntityGraph` on `customer`,
+`items`, and `items.product`, one round trip) — and fills everything, including the nested lines.
+
+**Nested DTOs.** `order.dto.OrderLineResponse` (`sku`, `productName`, `quantity`, `unitPrice`,
+`lineTotal`) and `order.dto.AddressResponse` mirror the request side's `OrderLineRequest`/
+`AddressRequest`. `productName` flattens `item → product`, same reasoning as
+`ProductResponse.categoryName`.
+
+**Gotcha: `@JsonView` doesn't cascade to nested types on its own.**
+`MapperFeature.DEFAULT_VIEW_INCLUSION` defaults to `false`, and that setting isn't scoped to the
+root type — once any view is active for a response, *every* type reached during that same
+serialization is filtered by it, not just the one carrying the `@JsonView`-annotated fields. The
+first version of `AddressResponse`/`OrderLineResponse` had no `@JsonView` on their own fields at
+all, on the assumption "unannotated means always included" (true for the *root* type, not for
+anything nested under an active view) — the detail endpoint came back with `"shippingAddress":{}`
+and `"lines":[{}]`, empty objects instead of real data. Fixed by tagging every field of both
+records `@JsonView(Views.Detail.class)`. Caught by `OrderControllerTest` asserting an actual nested
+field (`$.lines[0].sku`), not just that the container key was present.
+
+**`@JsonProperty`.** `OrderDetailResponse.total` carries `@JsonProperty("totalAmount")` — the Java
+name stays short, the wire name spells it out. Contrast the naming-strategy approach below, which
+renames every field at once instead of one at a time.
+
+**Naming strategy, scoped to one class.** `catalog.dto.ProductResponse` gets
+`@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)`: `categoryName` becomes
+`category_name` on the wire, every other field is already one word. Applied per-class rather than
+via `spring.jackson.property-naming-strategy` globally, so it reshapes exactly one, deliberately
+chosen contract instead of silently changing every other DTO's already-documented JSON shape.
+
+**Jackson 3 package split.** Verified against the actual `~/.m2` jars while building this:
+`jackson-annotations` was **not** relocated — `@JsonProperty`/`@JsonView` stay on
+`com.fasterxml.jackson.annotation.*` (still a 2.x artifact). `jackson-databind` **was** relocated —
+`PropertyNamingStrategies` and `@JsonNaming` now live under `tools.jackson.databind.*` (a 3.x
+artifact). Mixing the two up is a straightforward compile error, not a runtime surprise, but easy
+to get wrong when porting a Jackson 2 example.
+
+**Partial-update PATCH.** New `PATCH /api/v1/products/{sku}` + `catalog.dto.ProductPatchRequest` —
+every field `@Nullable`; `CatalogService.patchProduct` applies only the non-null ones. No
+validation groups needed: Jakarta Bean Validation already treats `null` as valid for everything
+except `@NotNull`/`@NotBlank`/`@NotEmpty`, so "only validate what was actually provided" falls out
+of the constraint annotations (`@Positive` on `price`) with no extra plumbing.
+
+```java
+public record ProductPatchRequest(
+        @Nullable String name, @Nullable String description,
+        @Nullable @Positive BigDecimal price, @Nullable String categoryName) {}
+```
+
+*Known limitation, documented rather than worked around*: Jackson binds a genuinely absent JSON
+field and an explicit `"field": null` to the same Java `null` — a plain record can't tell them
+apart. This PATCH can replace `description` or leave it alone, but can never clear it back to
+`null` once set (fall back to `PUT` for that). RFC 7396 JSON Merge Patch (`application/merge-patch+json`, deserialized as a `JsonNode` so
+"absent" and "null" are
+distinguishable) or RFC 6902 JSON Patch are the correct tools when that distinction matters —
+deliberately out of scope here, the same "considered and documented, not built" treatment as the
+4.2 validation-groups decision.
+
+**Gotcha: a validated body sharing a method with a directly-constrained parameter reports the
+wrong field name.** `patchProduct` was the first endpoint to combine a `@NotBlank @PathVariable`
+with a `@Valid @RequestBody` on the *same* method (`replaceProduct` does too, but nothing had ever
+exercised its body-validation failure path until now). That combination routes the body's cascaded
+violations through `HandlerMethodValidationException`, not `MethodArgumentNotValidException` —
+`config.web.ApiExceptionHandler` was reading every `ParameterValidationResult` as a flat scalar
+violation and reporting the bare method-parameter name (`"request"`) instead of the actual field (`"price"`). Fixed by checking for
+`org.springframework.validation.method.ParameterErrors` — the
+subtype Spring uses for a cascaded object argument, itself a Spring `Errors` with real
+`FieldError`s — and reading `getFieldErrors()` from it, the same as the `MethodArgumentNotValidException`
+path already did. Caught by `CatalogControllerTest.patchProductWithANonPositivePriceReturns400`
+expecting `"price"` and getting `"request"`; a new regression test (`invalidReplaceBodyReturns400WithFieldErrorsNotTheParameterName`) closes
+the same gap on
+`replaceProduct`.
+
+```bash
+curl -i localhost:8080/api/v1/products/LAP-0001            # category_name, not categoryName
+curl -i -X PATCH localhost:8080/api/v1/products/LAP-0001 -H 'Content-Type: application/json' \
+  -d '{"price":1199.00}'                                   # only price changes
+curl -i localhost:8080/api/v1/orders                       # Summary view: totalAmount, no lines
+curl -i localhost:8080/api/v1/orders/API-1                 # Detail view: nested lines + address
+```
+
+**Verification.** New slice cases: `CatalogControllerTest` (+4: PATCH happy path, PATCH validation
+failure, PATCH unknown SKU, the `replaceProduct` field-name regression test),
+`OrderControllerTest` (+1 new, 1 renamed: the Summary-view field-exclusion proof, the Detail-view
+nested assertions). New IT cases: `CatalogApiIT` (+2: PATCH round-trip, PATCH validation failure);
+`OrderApiIT`'s lifecycle test extended with Summary/Detail assertions in place.
+`./mvnw -pl spring-boot-training verify` → surefire 67 (+5), failsafe 61 (+2), BUILD SUCCESS. All
+touched files reformatted via the `idea` MCP.

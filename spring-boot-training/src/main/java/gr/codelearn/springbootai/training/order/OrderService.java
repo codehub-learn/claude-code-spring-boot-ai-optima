@@ -1,6 +1,7 @@
 package gr.codelearn.springbootai.training.order;
 
 import gr.codelearn.springbootai.training.common.NotFoundException;
+import gr.codelearn.springbootai.training.order.dto.OrderDetailResponse;
 import gr.codelearn.springbootai.training.order.internal.LowStockException;
 import gr.codelearn.springbootai.training.order.internal.OrderConfirmation;
 import gr.codelearn.springbootai.training.order.internal.OrderFactory;
@@ -8,6 +9,7 @@ import gr.codelearn.springbootai.training.order.internal.OrderPlacedEvent;
 import gr.codelearn.springbootai.training.order.internal.OrderPlacementService;
 import gr.codelearn.springbootai.training.order.internal.PlaceOrderCommand;
 import gr.codelearn.springbootai.training.order.internal.ReceiptDeliveryException;
+import gr.codelearn.springbootai.training.order.mapper.OrderWebMapper;
 
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -59,6 +61,7 @@ public class OrderService {
 	private final OrderFactory orderFactory;
 	private final OrderPlacementService orderPlacementService;
 	private final ApplicationEventPublisher events;
+	private final OrderWebMapper mapper;
 	private final OrderService self;
 
 	/**
@@ -67,12 +70,13 @@ public class OrderService {
 	 * work in a collaborator instead, the way {@link #placeBatchIndependently} uses {@link OrderPlacementService}.
 	 */
 	OrderService(final OrderRepository orderRepository, final OrderFactory orderFactory,
-				 final OrderPlacementService orderPlacementService, final ApplicationEventPublisher events,
+				 final OrderPlacementService orderPlacementService, final ApplicationEventPublisher events, final OrderWebMapper mapper,
 				 @Lazy final OrderService self) {
 		this.orderRepository = orderRepository;
 		this.orderFactory = orderFactory;
 		this.orderPlacementService = orderPlacementService;
 		this.events = events;
+		this.mapper = mapper;
 		this.self = self;
 	}
 
@@ -224,5 +228,19 @@ public class OrderService {
 										   .orElseThrow(() -> new NotFoundException("No order " + orderNumber));
 		order.setStatus(newStatus);
 		return OrderConfirmation.from(order);
+	}
+
+	// ---- U4.3: the nested detail view -------------------------------------------------------------------------------------------------
+
+	/**
+	 * The rich, single-order view {@code GET /orders/{orderNumber}} returns: the full aggregate — lines, each line's product, the shipping
+	 * address — mapped to {@link OrderDetailResponse} while still attached, via
+	 * {@link OrderRepository#findWithCustomerItemsAndProductsByOrderNumber}. {@code readOnly}, like every other query method here.
+	 */
+	@Transactional(readOnly = true)
+	public OrderDetailResponse getOrderDetail(final String orderNumber) {
+		final Order order = orderRepository.findWithCustomerItemsAndProductsByOrderNumber(orderNumber)
+										   .orElseThrow(() -> new NotFoundException("No order " + orderNumber));
+		return mapper.toDetailResponse(order);
 	}
 }

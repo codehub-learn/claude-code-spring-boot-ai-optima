@@ -47,6 +47,15 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 	Optional<Order> findWithCustomerAndItemsByOrderNumber(String orderNumber);
 
 	/**
+	 * The U4.3 detail-view read: {@code customer}, {@code items}, and each line's {@code product} in one round trip — the extra
+	 * {@code items.product} path is what {@link gr.codelearn.springbootai.training.order.dto.OrderLineResponse#productName()} needs, on
+	 * top
+	 * of what {@link #findWithCustomerAndItemsByOrderNumber} already loads.
+	 */
+	@EntityGraph(attributePaths = {"customer", "items", "items.product"})
+	Optional<Order> findWithCustomerItemsAndProductsByOrderNumber(String orderNumber);
+
+	/**
 	 * Aggregate JPQL: one row per {@link OrderStatus} with its count and the sum of {@code totalAmount}. Each {@code select} expression is
 	 * aliased to the matching {@link OrderStatusSummary} getter name so Spring Data can bind the tuple.
 	 */

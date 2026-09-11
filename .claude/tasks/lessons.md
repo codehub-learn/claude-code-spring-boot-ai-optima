@@ -445,3 +445,33 @@ Patterns captured after user corrections. Review at session start.
   `name` and a non-positive `price` on create until `OnCreate`/`OnUpdate` were declared
   `extends Default`. Caught by a slice test asserting the field-error list, not by compilation or
   startup.
+
+## Jackson 3 relocated databind, not annotations (U4.3)
+
+- `jackson-annotations` was **not** relocated: `@JsonProperty`, `@JsonView`, `@JsonInclude`, etc. stay on
+  `com.fasterxml.jackson.annotation.*` (still a 2.x artifact, `com.fasterxml.jackson.core:jackson-annotations`).
+  `jackson-databind` **was** relocated: `PropertyNamingStrategies` and the `@JsonNaming` annotation now live under
+  `tools.jackson.databind.*` (a 3.x artifact, `tools.jackson.core:jackson-databind`). Verified against the actual jars in `~/.m2`
+  before writing any import, not assumed — mixing the two up is an import-not-found compile error, easy to hit when porting a Jackson 2
+  example or guessing from memory.
+
+## `@JsonView` does not cascade to nested types on its own (U4.3)
+
+- `MapperFeature.DEFAULT_VIEW_INCLUSION` defaults to `false`, and it is not scoped to the root type being serialized: once any view is
+  active for a response, every type reached during that same serialization is filtered by it, not just the one whose fields carry
+  `@JsonView`. A nested record (`order.dto.AddressResponse`, `OrderLineResponse`) with no `@JsonView` on its own fields serialized as an
+  empty `{}` under a view-filtered parent, even though the containing field (`shippingAddress`, `lines`) was correctly tagged and
+  present. Every field of a nested type reached from a view-filtered response needs its own `@JsonView` too. Caught by a slice test
+  asserting an actual nested field value, not just that the container key was present in the JSON.
+
+## A validated `@RequestBody` sharing a method with a directly-constrained parameter loses its field names (U4.3)
+
+- A controller method combining a directly-constrained parameter (`@NotBlank @PathVariable`) with a cascaded `@Valid`/`@Validated`
+  `@RequestBody` reports the body's violations through `HandlerMethodValidationException`, not `MethodArgumentNotValidException` — even
+  though a body-only method (no other constrained parameter) on the same controller reports the same kind of violation through
+  `MethodArgumentNotValidException` as expected. An `ApiExceptionHandler` that reads every `ParameterValidationResult` as a flat scalar
+  (`result.getMethodParameter().getParameterName()`) reports the bare parameter name (`"request"`) instead of the real field
+  (`"price"`). Fix: check `result instanceof org.springframework.validation.method.ParameterErrors` — the subtype Spring uses for a
+  cascaded object argument, itself a Spring `Errors` with real `FieldError`s — and read `getFieldErrors()` from it in that case, the
+  same as the `MethodArgumentNotValidException` handler already does. This was a **pre-existing, silent bug**: `replaceProduct` had the
+  same method shape since U4.2 but nothing ever exercised its body-validation failure path until a new endpoint's test did.

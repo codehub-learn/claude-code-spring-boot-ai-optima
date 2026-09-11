@@ -3,6 +3,7 @@ package gr.codelearn.springbootai.training.catalog;
 import gr.codelearn.springbootai.training.catalog.dto.CategoryRequest;
 import gr.codelearn.springbootai.training.catalog.dto.CategoryResponse;
 import gr.codelearn.springbootai.training.catalog.dto.ProductFilter;
+import gr.codelearn.springbootai.training.catalog.dto.ProductPatchRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductResponse;
 
@@ -20,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -43,6 +45,7 @@ import java.util.List;
  *   <tr><td>{@code GET /products/{sku}}</td><td>{@code 200} / {@code 404}</td></tr>
  *   <tr><td>{@code POST /products}</td><td>{@code 201} + {@code Location}</td></tr>
  *   <tr><td>{@code PUT /products/{sku}}</td><td>{@code 200}</td></tr>
+ *   <tr><td>{@code PATCH /products/{sku}}</td><td>{@code 200}, partial update (U4.3 {@link ProductPatchRequest})</td></tr>
  *   <tr><td>{@code DELETE /products/{sku}}</td><td>{@code 204}</td></tr>
  *   <tr><td>{@code GET /categories}</td><td>{@code 200} {@link CategoryResponse} list</td></tr>
  *   <tr><td>{@code POST /categories}</td><td>{@code 201} + {@code Location}</td></tr>
@@ -105,6 +108,13 @@ class CatalogController {
 	ProductResponse replaceProduct(@PathVariable @NotBlank final String sku,
 								   @RequestBody @Validated(ProductRequest.OnUpdate.class) final ProductRequest request) {
 		return catalogService.replaceProduct(sku, request);
+	}
+
+	@PatchMapping("/products/{sku}")
+	@Operation(summary = "Partially update a product")
+	@ApiResponse(responseCode = "404", description = "No product with that SKU")
+	ProductResponse patchProduct(@PathVariable @NotBlank final String sku, @RequestBody @Valid final ProductPatchRequest request) {
+		return catalogService.patchProduct(sku, request);
 	}
 
 	@DeleteMapping("/products/{sku}")

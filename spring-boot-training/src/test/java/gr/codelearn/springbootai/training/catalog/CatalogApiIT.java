@@ -10,7 +10,10 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
+import java.math.BigDecimal;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.InstanceOfAssertFactories.BIG_DECIMAL;
 
 /**
  * U4.1/U4.2 HTTP integration test for the catalog endpoints: the real context + {@code config.web.WebConfig} +
@@ -53,9 +56,46 @@ class CatalogApiIT extends AbstractOracleIntegrationTest {
 				.hasStatus(HttpStatus.CREATED)
 				.hasHeader("Location", "http://localhost/api/v1/products/API-RT-1");
 
+		// ProductResponse is @JsonNaming(SnakeCaseStrategy.class) (U4.3): categoryName -> category_name on the wire.
 		assertThat(mvc.get().uri("/api/v1/products/{sku}", "API-RT-1"))
 				.hasStatusOk()
-				.bodyJson().extractingPath("$.categoryName").isEqualTo("Storage");
+				.bodyJson().extractingPath("$.category_name").isEqualTo("Storage");
+	}
+
+	@Test
+	void patchThenGetRoundTrips() {
+		final String createBody = """
+								  {"sku":"API-RT-2","name":"Patch Me SSD","description":"created by CatalogApiIT",
+								   "price":99.00,"categoryName":"Storage"}""";
+
+		assertThat(mvc.post().uri("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content(createBody))
+				.hasStatus(HttpStatus.CREATED);
+
+		// Only "price" on the wire; "name"/"description"/"categoryName" must survive unchanged.
+		assertThat(mvc.patch().uri("/api/v1/products/{sku}", "API-RT-2")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							   {"price":149.00}"""))
+				.hasStatusOk();
+
+		assertThat(mvc.get().uri("/api/v1/products/{sku}", "API-RT-2"))
+				.hasStatusOk()
+				.bodyJson()
+				.extractingPath("$.price").convertTo(BIG_DECIMAL).isEqualByComparingTo(new BigDecimal("149.00"));
+		assertThat(mvc.get().uri("/api/v1/products/{sku}", "API-RT-2"))
+				.hasStatusOk()
+				.bodyJson().extractingPath("$.name").isEqualTo("Patch Me SSD");
+	}
+
+	@Test
+	void patchWithANonPositivePriceReturnsAProblemDetail() {
+		assertThat(mvc.patch().uri("/api/v1/products/{sku}", "API-UNKNOWN")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							   {"price":-1}"""))
+				.hasStatus(HttpStatus.BAD_REQUEST)
+				.hasContentType(MediaType.APPLICATION_PROBLEM_JSON)
+				.bodyJson().extractingPath("$.errors[*].field").asArray().contains("price");
 	}
 
 	@Test

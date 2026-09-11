@@ -63,9 +63,10 @@ class CatalogControllerTest {
 	void getProductBySkuReturns200() {
 		given(catalogService.getProduct("LAP-0001")).willReturn(LAPTOP);
 
+		// ProductResponse is @JsonNaming(SnakeCaseStrategy.class) (U4.3): categoryName -> category_name on the wire.
 		assertThat(mvc.get().uri("/api/v1/products/{sku}", "LAP-0001"))
 				.hasStatusOk()
-				.bodyJson().extractingPath("$.categoryName").isEqualTo("Laptops");
+				.bodyJson().extractingPath("$.category_name").isEqualTo("Laptops");
 	}
 
 	@Test
@@ -101,6 +102,43 @@ class CatalogControllerTest {
 	}
 
 	@Test
+	void patchProductAppliesOnlyTheSuppliedFields() {
+		given(catalogService.patchProduct(eq("LAP-0001"), any())).willReturn(
+				new ProductResponse("LAP-0001", "Latitude 14 Ultralight (refurb)", "14\" ultrabook", new BigDecimal("1199.00"), "Laptops"
+				));
+
+		// Only "name" is on the wire; patchProduct is mocked, so this proves the controller forwards a single-field PATCH body and
+		// returns 200 with whatever the service hands back — the "which fields actually changed" logic is CatalogServiceTest territory.
+		assertThat(mvc.patch().uri("/api/v1/products/{sku}", "LAP-0001")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							   {"name":"Latitude 14 Ultralight (refurb)"}"""))
+				.hasStatusOk()
+				.bodyJson().extractingPath("$.name").isEqualTo("Latitude 14 Ultralight (refurb)");
+	}
+
+	@Test
+	void patchProductWithANonPositivePriceReturns400() {
+		assertThat(mvc.patch().uri("/api/v1/products/{sku}", "LAP-0001")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							   {"price":0}"""))
+				.hasStatus(HttpStatus.BAD_REQUEST)
+				.bodyJson().extractingPath("$.errors[*].field").asArray().contains("price");
+	}
+
+	@Test
+	void patchUnknownProductReturns404() {
+		given(catalogService.patchProduct(eq("NOPE"), any())).willThrow(new NotFoundException("No product with sku NOPE"));
+
+		assertThat(mvc.patch().uri("/api/v1/products/{sku}", "NOPE")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							   {"name":"Renamed"}"""))
+				.hasStatus(HttpStatus.NOT_FOUND);
+	}
+
+	@Test
 	void deleteProductReturns204() {
 		willDoNothing().given(catalogService).deleteProduct("LAP-0001");
 
@@ -133,6 +171,23 @@ class CatalogControllerTest {
 	void blankPathVariableReturns400ViaHandlerMethodValidation() {
 		assertThat(mvc.get().uri("/api/v1/products/{sku}", " "))
 				.hasStatus(HttpStatus.BAD_REQUEST);
+	}
+
+	@Test
+	void invalidReplaceBodyReturns400WithFieldErrorsNotTheParameterName() {
+		// replaceProduct combines a @NotBlank @PathVariable with a @Valid @RequestBody, so this failure is reported through
+		// HandlerMethodValidationException, not MethodArgumentNotValidException (U4.3 gotcha) — proves the advice still resolves
+		// "price", not the bare method-parameter name "request".
+		assertThat(mvc.put().uri("/api/v1/products/{sku}", "LAP-0001")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							   {"sku":"LAP-0001","name":"Latitude 14 Ultralight","description":null,"price":0,"categoryName":"Laptops"}
+							   """))
+				.hasStatus(HttpStatus.BAD_REQUEST)
+				.bodyJson()
+				.extractingPath("$.errors[*].field")
+				.asArray()
+				.contains("price");
 	}
 
 	@Test
