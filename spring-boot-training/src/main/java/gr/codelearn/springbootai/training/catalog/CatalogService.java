@@ -92,9 +92,7 @@ public class CatalogService {
 	public ProductResponse replaceProduct(final String sku, final ProductRequest request) {
 		final Product product = productRepository.findBySku(sku)
 												 .orElseThrow(() -> new NotFoundException("No product with sku " + sku));
-		product.setName(request.name());
-		product.setDescription(request.description());
-		product.setPrice(request.price());
+		mapper.updateEntityFromRequest(request, product);
 		product.setCategory(requireCategory(request.categoryName()));
 		return mapper.toResponse(productRepository.save(product));
 	}
@@ -108,15 +106,7 @@ public class CatalogService {
 	public ProductResponse patchProduct(final String sku, final ProductPatchRequest request) {
 		final Product product = productRepository.findBySku(sku)
 												 .orElseThrow(() -> new NotFoundException("No product with sku " + sku));
-		if (request.name() != null) {
-			product.setName(request.name());
-		}
-		if (request.description() != null) {
-			product.setDescription(request.description());
-		}
-		if (request.price() != null) {
-			product.setPrice(request.price());
-		}
+		mapper.patchEntityFromRequest(request, product);
 		if (request.categoryName() != null) {
 			product.setCategory(requireCategory(request.categoryName()));
 		}
@@ -142,7 +132,7 @@ public class CatalogService {
 	public CategoryResponse replaceCategory(final String name, final CategoryRequest request) {
 		final Category category = categoryRepository.findByName(name)
 													.orElseThrow(() -> new NotFoundException("No category named " + name));
-		category.setDescription(request.description());
+		mapper.updateEntityFromRequest(request, category);
 		return mapper.toResponse(categoryRepository.save(category));
 	}
 

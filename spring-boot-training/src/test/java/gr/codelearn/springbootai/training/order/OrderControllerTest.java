@@ -5,7 +5,7 @@ import gr.codelearn.springbootai.training.order.dto.AddressResponse;
 import gr.codelearn.springbootai.training.order.dto.OrderDetailResponse;
 import gr.codelearn.springbootai.training.order.dto.OrderLineResponse;
 import gr.codelearn.springbootai.training.order.internal.OrderConfirmation;
-import gr.codelearn.springbootai.training.order.mapper.OrderWebMapper;
+import gr.codelearn.springbootai.training.order.mapper.OrderWebMapperImpl;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,14 +28,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 /**
- * U4.1/U4.2/U4.3 slice test for {@link OrderController}. The real {@link OrderWebMapper} is imported (it is a plain record→record
- * converter); {@link OrderService} is mocked. Covers {@code POST → 201 + Location}, read-back (both the {@code Views.Summary} shape common
- * to place/list/patch-status and the {@code Views.Detail} shape unique to get-one), the {@code PATCH} status transition, the {@code 404}
- * failure path, a malformed body → {@code 400}, and (U4.2) a {@code @Valid} nested-body failure and an invalid {@code @Email} query param.
+ * U4.1/U4.2/U4.3/U4.4 slice test for {@link OrderController}. The real, MapStruct-generated {@code OrderWebMapperImpl} is imported directly
+ * by its generated class name - a {@code @WebMvcTest} slice does not component-scan {@code order.mapper}, and {@code @Import} needs a
+ * concrete class, not the {@code OrderWebMapper} interface it implements; {@link OrderService} is mocked. Covers
+ * {@code POST → 201 + Location}, read-back (both the {@code Views.Summary} shape common to place/list/patch-status and the
+ * {@code Views.Detail} shape unique to get-one), the {@code PATCH} status transition, the {@code 404} failure path, a malformed body →
+ * {@code 400}, and (U4.2) a {@code @Valid} nested-body failure and an invalid {@code @Email} query param.
  */
 @WebMvcTest(controllers = OrderController.class,
 			excludeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = WebMvcConfigurer.class))
-@Import(OrderWebMapper.class)
+@Import(OrderWebMapperImpl.class)
 class OrderControllerTest {
 
 	@Autowired

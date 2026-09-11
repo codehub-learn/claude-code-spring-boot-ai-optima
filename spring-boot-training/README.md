@@ -792,7 +792,8 @@ The first HTTP layer on the `catalog` slice: `CatalogController` and `OrderContr
 `config.web` package (CORS, config-driven paging, OpenAPI metadata). DTOs and mapping are kept **thin** — plain `*Request` / `*Response`
 records and hand-written `@Component` mappers (`CatalogWebMapper`, `OrderWebMapper`); U4.3 reshapes the records (Jackson 3, `@JsonView`,
 nested
-order lines, PATCH bodies) and U4.4 moves the mapping to MapStruct. Bean Validation and central error handling are U4.2.
+order lines, PATCH bodies) and U4.4 moves the mapping to MapStruct (both mappers keep their U4.1 names and method signatures — only the
+implementation changes, from a hand-written class to a generated one). Bean Validation and central error handling are U4.2.
 
 **Endpoints.**
 
@@ -1005,14 +1006,15 @@ manual `MappingJacksonValue` wrapping. One record, not two unrelated DTOs:
 
 ```java
 public record OrderDetailResponse(
-        @JsonView(Views.Summary.class) String orderNumber,
-        @JsonView(Views.Summary.class) OrderStatus status,
-        @JsonView(Views.Summary.class) @JsonProperty("totalAmount") BigDecimal total,
-        @JsonView(Views.Summary.class) int lineCount,
-        @JsonView(Views.Detail.class) @Nullable String customerEmail,
-        @JsonView(Views.Detail.class) @Nullable OffsetDateTime placedAt,
-        @JsonView(Views.Detail.class) @Nullable AddressResponse shippingAddress,
-        @JsonView(Views.Detail.class) List<OrderLineResponse> lines) {}
+		@JsonView(Views.Summary.class) String orderNumber,
+		@JsonView(Views.Summary.class) OrderStatus status,
+		@JsonView(Views.Summary.class) @JsonProperty("totalAmount") BigDecimal total,
+		@JsonView(Views.Summary.class) int lineCount,
+		@JsonView(Views.Detail.class) @Nullable String customerEmail,
+		@JsonView(Views.Detail.class) @Nullable OffsetDateTime placedAt,
+		@JsonView(Views.Detail.class) @Nullable AddressResponse shippingAddress,
+		@JsonView(Views.Detail.class) List<OrderLineResponse> lines) {
+}
 ```
 
 `OrderWebMapper.toResponse(OrderConfirmation)` (place/list/patch-status) only has the flat
@@ -1063,8 +1065,9 @@ of the constraint annotations (`@Positive` on `price`) with no extra plumbing.
 
 ```java
 public record ProductPatchRequest(
-        @Nullable String name, @Nullable String description,
-        @Nullable @Positive BigDecimal price, @Nullable String categoryName) {}
+		@Nullable String name, @Nullable String description,
+		@Nullable @Positive BigDecimal price, @Nullable String categoryName) {
+}
 ```
 
 *Known limitation, documented rather than worked around*: Jackson binds a genuinely absent JSON
@@ -1104,5 +1107,131 @@ failure, PATCH unknown SKU, the `replaceProduct` field-name regression test),
 `OrderControllerTest` (+1 new, 1 renamed: the Summary-view field-exclusion proof, the Detail-view
 nested assertions). New IT cases: `CatalogApiIT` (+2: PATCH round-trip, PATCH validation failure);
 `OrderApiIT`'s lifecycle test extended with Summary/Detail assertions in place.
+
+### 4.4 Request / Response mapping
+
+The U4.1 hand-written `@Component` mappers (`CatalogWebMapper`, `OrderWebMapper`) become MapStruct
+`@Mapper(componentModel = "spring")` **interfaces** — no more hand-written implementation class.
+MapStruct's annotation processor generates `CatalogWebMapperImpl` / `OrderWebMapperImpl` (each a
+Spring `@Component`) at compile time from the interface's method signatures and `@Mapping`
+annotations, under `target/generated-sources/annotations`. Both interfaces keep their U4.1 names
+and public method signatures, so every call site (`CatalogService`, `OrderController`,
+`OrderService`) is untouched — only the field type's *implementation* changed, same story as
+swapping a repository's implementation without touching its callers.
+
+**Deps.** `org.mapstruct:mapstruct` (compile) — version `mapstruct.version`, not in the Spring Boot
+BOM. The annotation-processor path (`lombok` → `lombok-mapstruct-binding` → `mapstruct-processor`,
+order matters so Lombok's generated setters exist before MapStruct looks for them) was already
+wired in the reactor parent's `maven-compiler-plugin` `pluginManagement`, ahead of this unit.
+
+**Entity → DTO, with a nested property.** `CatalogWebMapper.toResponse(Product)` needs one
+`@Mapping` — `categoryName` has no matching source property by name, so it is pulled from the
+nested association:
+
+```java
+@Mapping(target = "categoryName", source = "category.name")
+ProductResponse toResponse(Product product);
+```
+
+Every other field (`toResponse(Category)`, the top-level fields above) matches source and target
+property names directly, so no annotation is needed at all — MapStruct wires those by convention.
+
+**Nested + collection mapping, for free.** `OrderWebMapper.toCommand(PlaceOrderRequest)` carries **zero** `@Mapping` annotations.
+`PlaceOrderCommand`'s components (`orderNumber`, `customerEmail`,
+`shippingAddress`, `lines`) match `PlaceOrderRequest`'s by name; MapStruct auto-generates the
+nested record conversion (`AddressRequest` → `Address`, identical component names) *and* the
+collection conversion (`List<OrderLineRequest>` → `List<PlaceOrderCommand.Line>`, identical
+component names) with no configuration — the cleanest illustration in this unit of what MapStruct
+buys over hand-written mapping. `toDetailResponse(Order)` shows the same mechanism used
+deliberately: `lines` (`Set<OrderItem>` → `List<OrderLineResponse>`) and `shippingAddress`
+(`Address` → `AddressResponse`) are declared as ordinary `@Mapping(source = ...)` targets, and
+MapStruct resolves the element/nested conversion by matching the return type against the other
+abstract methods declared in the same interface (`toResponse(OrderItem)`, `toResponse(Address)`).
+
+**`@MappingTarget` — update-entity-from-DTO.** This is what actually replaces hand-written code,
+not just relocates it. `CatalogService.replaceProduct`/`patchProduct`/`replaceCategory` used to
+set each entity field by hand (four `if (request.x() != null)` blocks for the PATCH case); they now
+call a `void` mapper method that takes the DTO plus `@MappingTarget` and mutates the entity in
+place:
+
+```java
+@Mapping(target = "category", ignore = true)
+void updateEntityFromRequest(ProductRequest request, @MappingTarget Product product);
+
+@BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
+@Mapping(target = "category", ignore = true)
+void patchEntityFromRequest(ProductPatchRequest request, @MappingTarget Product product);
+```
+
+`nullValuePropertyMappingStrategy = IGNORE` generates the exact "skip if null" branch per field
+that `CatalogService.patchProduct` used to write by hand. `category` is `ignore`d on both — the
+request carries `categoryName` (`String`, the business key on the wire) but the entity field is a
+`Category` (an association); MapStruct matches by *type* as well as name, so there is no automatic
+`String → Category` conversion to generate, and resolving one needs a `CategoryRepository` query, a
+service concern, not a mapper's. `CatalogService` still does that lookup and calls
+`product.setCategory(...)` itself, immediately after the mapper call. `sku` (on `Product`) and
+`name` (on `Category`) need no `ignore` at all: both are business keys with no setter (CLAUDE.md —
+immutable, so `equals`/`hashCode` stay stable), and MapStruct only ever writes to a property that
+has one.
+
+**Two methods deliberately stay hand-written `default` methods**, because neither is really a
+"map these matching properties" problem:
+
+- `CatalogWebMapper.toResponsePage(Page<Product>)` — the `Page<Entity>` → `Page<Response>` helper
+  the unit asks for. MapStruct has no `Page` support to generate against (it is a wrapper, not a
+  bean with matching properties); the one-line `page.map(this::toResponse)` reuses the *generated*
+  `toResponse(Product)` method underneath.
+- `OrderWebMapper.toResponse(OrderConfirmation)` — three `OrderDetailResponse` fields are literal
+  `null` and one is `List.of()`, none sourced from `OrderConfirmation` at all (it carries no
+  customer email, placement time, address, or line detail). Forcing that through
+  `@Mapping(constant = ...)` four times would read worse than the plain constructor call it
+  replaces; safe regardless, since every caller (`placeOrder`/`listOrders`/`updateStatus`) is
+  `@JsonView(Views.Summary.class)` and never serializes those fields.
+
+**Computed fields via `expression`.** `OrderWebMapper.toResponse(OrderItem)` needs a `lineTotal`
+that is not a property on anything — `unitPrice * quantity` — and `OrderItem.lineTotal()` (which
+computes the same thing) is package-private in `order`, unreachable from `order.mapper`. Restated
+as a MapStruct expression instead of a new public method:
+
+```java
+@Mapping(target = "sku", source = "product.sku")
+@Mapping(target = "productName", source = "product.name")
+@Mapping(target = "lineTotal",
+        expression = "java(item.getUnitPrice().multiply(java.math.BigDecimal.valueOf(item.getQuantity())))")
+OrderLineResponse toResponse(OrderItem item);
+```
+
+`toDetailResponse(Order)` uses the same technique for `lineCount`
+(`expression = "java(order.getItems().size())"` — `Set.size()` isn't a bean property MapStruct can
+match automatically) and plain `source = "..."` for the rest (`total ← totalAmount`,
+`customerEmail ← customer.email`).
+
+**Verifying the generated code.** `target/generated-sources/annotations/.../CatalogWebMapperImpl.java`
+and `.../OrderWebMapperImpl.java` are worth reading once after a `compile` — every `@Mapping`
+decision above shows up as plain, readable Java (null checks, field-by-field assignment, the
+`if (request.x() != null)` guards), which is the actual selling point over a reflection-based
+mapper: no runtime surprises, and a compile error the moment a mapped property stops matching.
+
+**Test-slice fallout.** `OrderControllerTest` used to `@Import(OrderWebMapper.class)` (a concrete
+`@Component` class); a `@WebMvcTest` slice does not component-scan `order.mapper`, and once
+`OrderWebMapper` is an interface `@Import` needs a real class. Changed to
+`@Import(OrderWebMapperImpl.class)` — MapStruct's generated implementation, by its standard
+`<MapperName>Impl` name. `CatalogControllerTest` needed no change; it mocks `CatalogService`
+directly and never touches `CatalogWebMapper`.
+
+```bash
+./mvnw -pl spring-boot-training compile
+find spring-boot-training/target/generated-sources/annotations -name '*MapperImpl.java'
+```
+
+**Verification.** New unit tests, no Spring context (MapStruct's generated `@Component` still has a
+public no-arg constructor): `catalog/mapper/CatalogWebMapperTest` (5 — nested `categoryName`, the
+`Page` helper, both `@MappingTarget` update methods including the PATCH null-skip behaviour, the
+category-request update writing only `description`), `order/mapper/OrderWebMapperTest` (3 — the
+zero-`@Mapping` nested+collection `toCommand`, the `default`-method summary response, the full
+`toDetailResponse` aggregate walk). `./mvnw -pl spring-boot-training verify` → surefire 75 (+8, no
+regressions), failsafe 61 (unchanged — `CatalogApiIT`'s existing PATCH/PUT round-trips are the
+end-to-end proof that the generated update methods behave exactly like the manual code they
+replaced).
 `./mvnw -pl spring-boot-training verify` → surefire 67 (+5), failsafe 61 (+2), BUILD SUCCESS. All
 touched files reformatted via the `idea` MCP.

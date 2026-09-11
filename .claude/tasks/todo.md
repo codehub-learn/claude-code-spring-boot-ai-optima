@@ -93,7 +93,7 @@ separate and out of scope here — no AI code in this wave.
 - [x] **4.3 DTOs** — `*Request` / `*Response` records per resource, no entity leakage, nested DTOs
   for `Order` + `OrderItem`, Jackson 3 shaping (`@JsonProperty`, naming strategy, `@JsonView`
   for list vs detail), a partial-update (PATCH) payload approach.
-- [ ] **4.4 Request / Response mapping** — MapStruct mappers (`componentModel = "spring"`),
+- [x] **4.4 Request / Response mapping** — MapStruct mappers (`componentModel = "spring"`),
   entity ↔ DTO, nested + collection mapping, update-entity-from-DTO (`@MappingTarget`),
   `Page<Entity>` → `Page<Response>` helper.
 - [ ] **4.5 API testing** — `@WebMvcTest` / `MockMvcTester` slice tests per controller (happy +
@@ -661,8 +661,8 @@ profile deleted; docs + lessons corrected.
 
 - New `config/web/ApiExceptionHandler` (`@RestControllerAdvice extends ResponseEntityExceptionHandler`)
   is the single place any exception becomes an RFC 9457 `ProblemDetail`: `NotFoundException` → 404,
-  `CatalogDuplicateException` → 409 (both direct `@ExceptionHandler`s), a catch-all `Exception` → 500
-  (logged at ERROR). Overrides `handleMethodArgumentNotValid`
+  `CatalogDuplicateException` → 409 (both direct `@ExceptionHandler`s), a catch-all `Exception` → 500 (logged at ERROR). Overrides
+  `handleMethodArgumentNotValid`
   (`@Valid` body failures) and `handleHandlerMethodValidationException` (`@Validated`/constrained
   path-or-query-param failures) to attach an `errors` extension — `{field, message}` per violation,
   built from `BindingResult.getFieldErrors()` and `getParameterValidationResults()` respectively.
@@ -709,8 +709,8 @@ profile deleted; docs + lessons corrected.
   groups `extends Default`.
 - Tests: `CatalogControllerTest` +3 (`invalidCreateBodyReturns400WithFieldErrors`,
   `blankPathVariableReturns400ViaHandlerMethodValidation`, `createDuplicateSkuReturns409ViaTheCentralAdvice`
-  — the last proves 409 now comes from the advice, not `@ResponseStatus`), `OrderControllerTest` +2
-  (`emptyLinesReturns400WithFieldErrors` — a top-level `@NotEmpty` plus a cascaded nested `@Valid`
+  — the last proves 409 now comes from the advice, not `@ResponseStatus`), `OrderControllerTest` +2 (`emptyLinesReturns400WithFieldErrors` —
+  a top-level `@NotEmpty` plus a cascaded nested `@Valid`
   failure together, asserting both `lines` and `shippingAddress.line1` in the same `errors` array;
   `malformedCustomerEmailFilterReturns400`). `CatalogApiIT` / `OrderApiIT` +1 each, asserting the
   `application/problem+json` content type and `errors` shape end-to-end against real Oracle.
@@ -730,8 +730,8 @@ the endpoint categories had been missing: `PUT /api/v1/categories/{name}`
 (`CatalogService.replaceCategory`, updates `description` only — `name` is the natural key, sourced
 from the path). `CatalogController.createCategory` now validates against `@Validated(OnCreate.class)`.
 Tests: `CatalogControllerTest` +3 (`invalidCreateCategoryBodyReturns400WithFieldErrors`,
-`replaceCategoryReturns200`, `replaceUnknownCategoryReturns404`), `CatalogApiIT` +1
-(`createThenReplaceCategoryRoundTrips`, plus its `@AfterEach` now also cleans up `API-%` categories).
+`replaceCategoryReturns200`, `replaceUnknownCategoryReturns404`), `CatalogApiIT` +1 (`createThenReplaceCategoryRoundTrips`, plus its
+`@AfterEach` now also cleans up `API-%` categories).
 `./mvnw -pl spring-boot-training verify` → surefire 62 (+3), failsafe 59 (+1), BUILD SUCCESS. All
 touched files reformatted via the `idea` MCP.
 
@@ -829,3 +829,45 @@ unchanged. `./mvnw -pl spring-boot-training verify` green. README follow-up subs
   mixed-parameter validation-exception routing).
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 67 (+5), failsafe 61 (+2); all prior tests unchanged. All touched
   files reformatted via the `idea` MCP.
+
+### 4.4 Request / Response mapping (done)
+
+- `spring-boot-training/pom.xml`: added the `org.mapstruct:mapstruct` compile dependency (`${mapstruct.version}`, not Boot-BOM-managed).
+  The annotation-processor path (`lombok` → `lombok-mapstruct-binding` → `mapstruct-processor`) was already wired in the reactor parent's
+  `maven-compiler-plugin` `pluginManagement`, ahead of this unit — no change needed there.
+- `catalog/mapper/CatalogWebMapper.java` and `order/mapper/OrderWebMapper.java`: class → `@Mapper(componentModel = "spring")` interface,
+  same name and public method signatures as the U4.1 hand-written versions, so every call site (`CatalogService`, `OrderController`,
+  `OrderService`) is unchanged. MapStruct generates `CatalogWebMapperImpl` / `OrderWebMapperImpl` (each a Spring `@Component`) under
+  `target/generated-sources/annotations`.
+	- `CatalogWebMapper`: `toResponse(Product)` needs one `@Mapping` (`categoryName ← category.name`, nested); `toResponse(Category)`
+	  matches by name, no annotation. New `updateEntityFromRequest`/`patchEntityFromRequest` (`@MappingTarget`, the latter with
+	  `nullValuePropertyMappingStrategy = IGNORE`) replace `CatalogService`'s hand-written field-by-field / null-guarded assignment for
+	  `replaceProduct`/`patchProduct`; `category` is `@Mapping(ignore = true)` on both (source is `String categoryName`, target is a
+	  `Category` association — a type mismatch MapStruct won't auto-convert, and resolving it needs a `CategoryRepository` query, which
+	  stays a service concern). New `updateEntityFromRequest(CategoryRequest, @MappingTarget Category)` replaces
+	  `replaceCategory`'s one-liner. `sku`/`name` need no `ignore` — both are business keys with no setter, so MapStruct never touches
+	  them regardless. `toResponsePage(Page<Product>)` stays a hand-written `default` method (no MapStruct `Page` support) — the
+	  "`Page<Entity>` → `Page<Response>` helper" the checklist names.
+	- `OrderWebMapper`: `toCommand(PlaceOrderRequest)` needs **zero** `@Mapping` annotations — `PlaceOrderCommand`'s components match
+	  `PlaceOrderRequest`'s by name, so MapStruct auto-generates both the nested `AddressRequest → Address` record conversion and the
+	  `List<OrderLineRequest> → List<PlaceOrderCommand.Line>` collection conversion. `toResponse(OrderConfirmation)` stays a `default`
+	  method unchanged (three fields are literal `null`, one is `List.of()` — nothing to map, `@Mapping(constant = ...)` would read worse
+	  than the constructor call). `toDetailResponse(Order)` uses `expression` for `lineCount` (`order.getItems().size()`, not a bean
+	  property) and `source` for the rest; new `toResponse(Address)` (direct match) and `toResponse(OrderItem)` (`sku`/`productName` from
+	  nested `product.*`, `lineTotal` via `expression` — `OrderItem.lineTotal()` is package-private, unreachable from `order.mapper`) are
+	  auto-selected by MapStruct for the `shippingAddress`/`lines` nested + collection targets.
+- `catalog/CatalogService.java`: `replaceProduct`, `patchProduct`, `replaceCategory` now call the new `@MappingTarget` mapper methods
+  instead of hand-setting fields; same fields written, same category-resolution guard, no behaviour change.
+- `order/OrderControllerTest.java`: `@Import(OrderWebMapper.class)` no longer creates a bean once `OrderWebMapper` is an interface (a
+  `@WebMvcTest` slice does not component-scan `order.mapper`, and `@Import` needs a concrete class) — changed to
+  `@Import(OrderWebMapperImpl.class)`, MapStruct's generated implementation by its standard `<MapperName>Impl` name.
+  `CatalogControllerTest` needed no change (mocks `CatalogService` directly, never touches `CatalogWebMapper`).
+- New unit tests, no Spring context (the generated `@Component` still has a public no-arg constructor):
+  `catalog/mapper/CatalogWebMapperTest`
+  (5), `order/mapper/OrderWebMapperTest` (3).
+- Docs: `README.md` new `### 4.4 Request / Response mapping` section; the 4.1 paragraph's "hand-written `@Component` mappers" line
+  corrected to note the names/signatures stay put across the U4.4 swap. No `lessons.md` entry — the generated `*Impl` classes matched the
+  design on the first `compile`, no correction occurred.
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 75 (+8: `CatalogWebMapperTest` 5, `OrderWebMapperTest` 3), failsafe
+  61 (unchanged — `CatalogApiIT`'s existing PATCH/PUT round-trips are the end-to-end proof the generated update methods behave like the
+  manual code they replaced). All touched files reformatted via the `idea` MCP.

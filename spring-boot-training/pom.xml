@@ -87,6 +87,17 @@
 			<optional>true</optional>
 		</dependency>
 
+		<!-- MapStruct (U4.4): generates the entity <-> DTO mappers (catalog.mapper, order.mapper) at compile time from
+		     a @Mapper interface - no hand-written mapping code. The parent pom already wires the annotation-processor
+		     path (lombok -> lombok-mapstruct-binding -> mapstruct-processor, in that order); this adds the runtime
+		     annotations/types (@Mapper, @Mapping, @MappingTarget, ...) to the compile classpath. Version from the
+		     reactor property mapstruct.version - not in the Spring Boot BOM. -->
+		<dependency>
+			<groupId>org.mapstruct</groupId>
+			<artifactId>mapstruct</artifactId>
+			<version>${mapstruct.version}</version>
+		</dependency>
+
 		<!-- Oracle JDBC driver (runtime only; the app compiles against JPA, not the driver). ojdbc17 is the
 		     JDK 17+ build - the right one for the Java 25 toolchain and virtual threads. Version comes from
 		     the Spring Boot BOM property oracle-database.version. -->
