@@ -1,21 +1,23 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.catalog.dto.CategoryRequest;
 import gr.codelearn.springbootai.training.catalog.dto.CategoryResponse;
-import gr.codelearn.springbootai.training.catalog.dto.CreateCategoryRequest;
-import gr.codelearn.springbootai.training.catalog.dto.CreateProductRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductFilter;
+import gr.codelearn.springbootai.training.catalog.dto.ProductRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductResponse;
-import gr.codelearn.springbootai.training.catalog.dto.UpdateProductRequest;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.data.web.PagedModel;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -44,11 +46,19 @@ import java.util.List;
  *   <tr><td>{@code DELETE /products/{sku}}</td><td>{@code 204}</td></tr>
  *   <tr><td>{@code GET /categories}</td><td>{@code 200} {@link CategoryResponse} list</td></tr>
  *   <tr><td>{@code POST /categories}</td><td>{@code 201} + {@code Location}</td></tr>
+ *   <tr><td>{@code PUT /categories/{name}}</td><td>{@code 200}</td></tr>
  * </table>
  *
  * <p>The class-level {@code produces = application/json} means an {@code Accept} header the app cannot satisfy (e.g. {@code
  * application/xml}, with no XML message converter on the classpath) is answered {@code 406 Not Acceptable} — MVC content negotiation, not
  * controller code.
+ *
+ * <p><b>Validation (U4.2).</b> A constraint directly on a discrete {@code @PathVariable} (e.g. {@code @NotBlank}) is validated by Spring
+ * MVC itself since Framework 6.1 — no class-level {@code @Validated} needed; a violation throws {@code HandlerMethodValidationException}.
+ * <b>Do not</b> add class-level {@code @Validated} here: that opts the bean into the older AOP method-validation interceptor instead,
+ * which throws a plain {@code jakarta.validation.ConstraintViolationException} and preempts the newer mechanism entirely (confirmed by
+ * running it — the interceptor wraps the call before MVC's own resolution matters). A {@code @RequestBody}/{@code @Valid} failure throws
+ * {@code MethodArgumentNotValidException}, unaffected either way. Both land in {@code config.web.ApiExceptionHandler}.
  */
 @Tag(name = "catalog")
 @RestController
@@ -63,7 +73,7 @@ class CatalogController {
 
 	@GetMapping("/products")
 	@Operation(summary = "List products (paged, filtered)")
-	PagedModel<ProductResponse> listProducts(@ParameterObject final ProductFilter filter,
+	PagedModel<ProductResponse> listProducts(@ParameterObject @Valid final ProductFilter filter,
 											 @ParameterObject @PageableDefault(sort = "sku") final Pageable pageable) {
 		return new PagedModel<>(catalogService.findProducts(filter, pageable));
 	}
@@ -71,7 +81,7 @@ class CatalogController {
 	@GetMapping("/products/{sku}")
 	@Operation(summary = "Get one product by SKU")
 	@ApiResponse(responseCode = "404", description = "No product with that SKU")
-	ProductResponse getProduct(@PathVariable final String sku) {
+	ProductResponse getProduct(@PathVariable @NotBlank final String sku) {
 		return catalogService.getProduct(sku);
 	}
 
@@ -79,7 +89,8 @@ class CatalogController {
 	@Operation(summary = "Create a product")
 	@ApiResponse(responseCode = "201", description = "Created; URI in the Location header")
 	@ApiResponse(responseCode = "409", description = "SKU already exists")
-	ResponseEntity<ProductResponse> createProduct(@RequestBody final CreateProductRequest request) {
+	ResponseEntity<ProductResponse> createProduct(
+			@RequestBody @Validated(ProductRequest.OnCreate.class) final ProductRequest request) {
 		final ProductResponse created = catalogService.createProduct(request);
 		final URI location = ServletUriComponentsBuilder.fromCurrentRequestUri()
 														.path("/{sku}")
@@ -91,7 +102,8 @@ class CatalogController {
 	@PutMapping("/products/{sku}")
 	@Operation(summary = "Replace a product")
 	@ApiResponse(responseCode = "404", description = "No product with that SKU")
-	ProductResponse replaceProduct(@PathVariable final String sku, @RequestBody final UpdateProductRequest request) {
+	ProductResponse replaceProduct(@PathVariable @NotBlank final String sku,
+								   @RequestBody @Validated(ProductRequest.OnUpdate.class) final ProductRequest request) {
 		return catalogService.replaceProduct(sku, request);
 	}
 
@@ -99,7 +111,7 @@ class CatalogController {
 	@Operation(summary = "Delete a product")
 	@ApiResponse(responseCode = "204", description = "Deleted")
 	@ApiResponse(responseCode = "404", description = "No product with that SKU")
-	ResponseEntity<Void> deleteProduct(@PathVariable final String sku) {
+	ResponseEntity<Void> deleteProduct(@PathVariable @NotBlank final String sku) {
 		catalogService.deleteProduct(sku);
 		return ResponseEntity.noContent().build();
 	}
@@ -113,7 +125,7 @@ class CatalogController {
 	@GetMapping("/categories/{name}")
 	@Operation(summary = "Get one category by name")
 	@ApiResponse(responseCode = "404", description = "No category with that name")
-	CategoryResponse getCategory(@PathVariable final String name) {
+	CategoryResponse getCategory(@PathVariable @NotBlank final String name) {
 		return catalogService.getCategory(name);
 	}
 
@@ -121,12 +133,21 @@ class CatalogController {
 	@Operation(summary = "Create a category")
 	@ApiResponse(responseCode = "201", description = "Created; URI in the Location header")
 	@ApiResponse(responseCode = "409", description = "Category name already exists")
-	ResponseEntity<CategoryResponse> createCategory(@RequestBody final CreateCategoryRequest request) {
+	ResponseEntity<CategoryResponse> createCategory(
+			@RequestBody @Validated(CategoryRequest.OnCreate.class) final CategoryRequest request) {
 		final CategoryResponse created = catalogService.createCategory(request);
 		final URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
 														.path("/api/v1/categories/{name}")
 														.buildAndExpand(created.name())
 														.toUri();
 		return ResponseEntity.created(location).body(created);
+	}
+
+	@PutMapping("/categories/{name}")
+	@Operation(summary = "Replace a category")
+	@ApiResponse(responseCode = "404", description = "No category with that name")
+	CategoryResponse replaceCategory(@PathVariable @NotBlank final String name,
+									 @RequestBody @Validated(CategoryRequest.OnUpdate.class) final CategoryRequest request) {
+		return catalogService.replaceCategory(name, request);
 	}
 }

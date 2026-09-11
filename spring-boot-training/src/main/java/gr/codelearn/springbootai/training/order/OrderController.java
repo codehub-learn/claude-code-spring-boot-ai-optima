@@ -9,6 +9,8 @@ import gr.codelearn.springbootai.training.order.mapper.OrderWebMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +33,12 @@ import java.util.List;
  *
  * <p>Delegates to {@link OrderService} (the U3.4 transaction exhibit, extended with the two use cases the web layer needs) and maps the
  * {@link OrderConfirmation} it returns to an {@link OrderResponse} through {@link OrderWebMapper}.
+ *
+ * <p><b>Validation (U4.2).</b> {@code @Email} on the optional {@code customerEmail} filter is a discrete {@code @RequestParam} constraint
+ * — Spring MVC validates it natively (Framework 6.1+, {@code HandlerMethodValidationException} on failure), no class-level
+ * {@code @Validated} involved (see {@link gr.codelearn.springbootai.training.catalog.CatalogController}'s Javadoc for why adding one would
+ * be wrong here). {@code @Email} only checks a non-null value, so the parameter stays optional. The {@code @Valid} request bodies below
+ * throw {@code MethodArgumentNotValidException} instead; both land in {@code config.web.ApiExceptionHandler}.
  */
 @Tag(name = "orders")
 @RestController
@@ -49,7 +57,7 @@ class OrderController {
 	@Operation(summary = "Place an order")
 	@ApiResponse(responseCode = "201", description = "Placed; URI in the Location header")
 	@ApiResponse(responseCode = "404", description = "Unknown customer or product")
-	ResponseEntity<OrderResponse> placeOrder(@RequestBody final PlaceOrderRequest request) {
+	ResponseEntity<OrderResponse> placeOrder(@RequestBody @Valid final PlaceOrderRequest request) {
 		final OrderResponse placed = mapper.toResponse(orderService.placeOrder(mapper.toCommand(request)));
 		final URI location = ServletUriComponentsBuilder.fromCurrentRequestUri()
 														.path("/{orderNumber}")
@@ -67,7 +75,7 @@ class OrderController {
 
 	@GetMapping
 	@Operation(summary = "List orders, optionally by customer or status")
-	List<OrderResponse> listOrders(@RequestParam(required = false) final @Nullable String customerEmail,
+	List<OrderResponse> listOrders(@RequestParam(required = false) final @Nullable @Email String customerEmail,
 								   @RequestParam(required = false) final @Nullable OrderStatus status) {
 		return orderService.listOrders(customerEmail, status).stream().map(mapper::toResponse).toList();
 	}
@@ -75,7 +83,8 @@ class OrderController {
 	@PatchMapping("/{orderNumber}/status")
 	@Operation(summary = "Change an order's status")
 	@ApiResponse(responseCode = "404", description = "No order with that number")
-	OrderResponse updateStatus(@PathVariable final String orderNumber, @RequestBody final UpdateOrderStatusRequest request) {
+	OrderResponse updateStatus(@PathVariable final String orderNumber,
+							   @RequestBody @Valid final UpdateOrderStatusRequest request) {
 		return mapper.toResponse(orderService.updateStatus(orderNumber, request.status()));
 	}
 }

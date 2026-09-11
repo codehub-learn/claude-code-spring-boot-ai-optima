@@ -417,3 +417,31 @@ Patterns captured after user corrections. Review at session start.
 - Config-driven paging without per-method clamping: a
   `PageableHandlerMethodArgumentResolverCustomizer` `@Bean` (`setMaxPageSize` / `setFallbackPageable`).
   `@PageableDefault` on the arg overrides the fallback but the max-size clamp still applies.
+
+## Two different exceptions for two different MVC validation triggers (U4.2)
+
+- A `@Valid` `@RequestBody` failure throws `MethodArgumentNotValidException` (unchanged since
+  Spring 6). A `@Validated`/constrained `@PathVariable` or `@RequestParam` failure throws
+  `HandlerMethodValidationException` (Spring Framework 6.1+) — **not**
+  `jakarta.validation.ConstraintViolationException`, which is what `jakarta.validation.Validator`
+  throws directly and what pre-6.1 examples show catching. An `@RestControllerAdvice` written from
+  an older example silently lets path/query violations fall through to the generic-`Exception`
+  handler (or a 500) because it never registers a handler for the type actually thrown.
+- Do **not** add class-level `@Validated` to a controller just to get discrete `@PathVariable` /
+  `@RequestParam` validation. Spring MVC validates a constrained parameter natively since 6.1, no
+  class-level annotation needed. Adding `@Validated` on the class instead activates the older Spring
+  AOP method-validation interceptor (`MethodValidationPostProcessor` / `MethodValidationInterceptor`
+  — the same mechanism `@Validated` `@Service` beans use): it CGLIB-proxies the controller and throws
+  `ConstraintViolationException` on every call, preempting MVC's own mechanism entirely. Confirmed by
+  running it: the intended `400` bodies came back empty because the advice had no handler for that
+  exception type.
+
+## Jakarta validation groups: name a group on `@Validated`, and it replaces `Default` (U4.2)
+
+- `@Validated(SomeGroup.class)` validates **only** `SomeGroup` — every constraint with no explicit
+  `groups` attribute belongs to `jakarta.validation.groups.Default`, and naming a different group
+  does not add to `Default`, it replaces it. A merged create/update DTO
+  (`catalog.dto.ProductRequest`, `sku` required only via `OnCreate`) silently accepted a blank
+  `name` and a non-positive `price` on create until `OnCreate`/`OnUpdate` were declared
+  `extends Default`. Caught by a slice test asserting the field-error list, not by compilation or
+  startup.

@@ -1,11 +1,10 @@
 package gr.codelearn.springbootai.training.catalog;
 
+import gr.codelearn.springbootai.training.catalog.dto.CategoryRequest;
 import gr.codelearn.springbootai.training.catalog.dto.CategoryResponse;
-import gr.codelearn.springbootai.training.catalog.dto.CreateCategoryRequest;
-import gr.codelearn.springbootai.training.catalog.dto.CreateProductRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductFilter;
+import gr.codelearn.springbootai.training.catalog.dto.ProductRequest;
 import gr.codelearn.springbootai.training.catalog.dto.ProductResponse;
-import gr.codelearn.springbootai.training.catalog.dto.UpdateProductRequest;
 import gr.codelearn.springbootai.training.catalog.internal.CatalogDuplicateException;
 import gr.codelearn.springbootai.training.catalog.mapper.CatalogWebMapper;
 import gr.codelearn.springbootai.training.common.NotFoundException;
@@ -24,8 +23,8 @@ import java.util.List;
  * {@link Category} entities never leave it (CLAUDE.md), and the mapping runs inside the transaction while the LAZY {@code category}
  * association is still reachable.
  *
- * <p>Validation is minimal on purpose: a duplicate business key or an unknown category throws, everything else is trusted until U4.2 adds
- * Bean Validation at the controller boundary.
+ * <p>Bean Validation (blank/positive/required fields) runs at the controller boundary (U4.2) before a request ever reaches here; this
+ * service only guards what a {@code @Valid} annotation cannot express — a duplicate business key or an unknown category.
  */
 @Service
 public class CatalogService {
@@ -78,7 +77,7 @@ public class CatalogService {
 	}
 
 	@Transactional
-	public ProductResponse createProduct(final CreateProductRequest request) {
+	public ProductResponse createProduct(final ProductRequest request) {
 		if (productRepository.existsBySku(request.sku())) {
 			throw new CatalogDuplicateException("A product with sku " + request.sku() + " already exists");
 		}
@@ -89,7 +88,7 @@ public class CatalogService {
 	}
 
 	@Transactional
-	public ProductResponse replaceProduct(final String sku, final UpdateProductRequest request) {
+	public ProductResponse replaceProduct(final String sku, final ProductRequest request) {
 		final Product product = productRepository.findBySku(sku)
 												 .orElseThrow(() -> new NotFoundException("No product with sku " + sku));
 		product.setName(request.name());
@@ -107,11 +106,19 @@ public class CatalogService {
 	}
 
 	@Transactional
-	public CategoryResponse createCategory(final CreateCategoryRequest request) {
+	public CategoryResponse createCategory(final CategoryRequest request) {
 		if (categoryRepository.existsByName(request.name())) {
 			throw new CatalogDuplicateException("A category named " + request.name() + " already exists");
 		}
 		return mapper.toResponse(categoryRepository.save(new Category(request.name(), request.description())));
+	}
+
+	@Transactional
+	public CategoryResponse replaceCategory(final String name, final CategoryRequest request) {
+		final Category category = categoryRepository.findByName(name)
+													.orElseThrow(() -> new NotFoundException("No category named " + name));
+		category.setDescription(request.description());
+		return mapper.toResponse(categoryRepository.save(category));
 	}
 
 	private Category requireCategory(final String name) {

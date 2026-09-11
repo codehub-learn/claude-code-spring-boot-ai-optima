@@ -86,7 +86,7 @@ separate and out of scope here — no AI code in this wave.
   `/api/v1/...`, verb mappings, `@PathVariable` / `@RequestParam` / `@RequestBody` binding,
   `ResponseEntity` with explicit status codes (201 + `Location`, 204, etc.), pagination params,
   content negotiation, springdoc OpenAPI annotations + `/swagger-ui.html`.
-- [ ] **4.2 Exception handling & validation** — Jakarta Bean Validation on request records,
+- [x] **4.2 Exception handling & validation** — Jakarta Bean Validation on request records,
   `@Validated` on path/query params and on `AppProperties`, validation groups for create vs
   update, central `@RestControllerAdvice` returning RFC 9457 `ProblemDetail`, domain exceptions (`ProductNotFoundException`, etc.) →
   `ProblemDetail` in one place.
@@ -656,6 +656,84 @@ profile deleted; docs + lessons corrected.
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 54 = +11 (`CatalogControllerTest` 6, `OrderControllerTest` 5), failsafe
   56 = +6 (`CatalogApiIT` 4,
   `OrderApiIT` 2); all prior tests unchanged. All touched files reformatted via the `idea` MCP.
+
+### 4.2 Exception handling & validation (done)
+
+- New `config/web/ApiExceptionHandler` (`@RestControllerAdvice extends ResponseEntityExceptionHandler`)
+  is the single place any exception becomes an RFC 9457 `ProblemDetail`: `NotFoundException` → 404,
+  `CatalogDuplicateException` → 409 (both direct `@ExceptionHandler`s), a catch-all `Exception` → 500
+  (logged at ERROR). Overrides `handleMethodArgumentNotValid`
+  (`@Valid` body failures) and `handleHandlerMethodValidationException` (`@Validated`/constrained
+  path-or-query-param failures) to attach an `errors` extension — `{field, message}` per violation,
+  built from `BindingResult.getFieldErrors()` and `getParameterValidationResults()` respectively.
+  `@ResponseStatus` removed from both `NotFoundException` and `CatalogDuplicateException`; their
+  Javadoc now points here instead of describing a future step.
+- **User decision on validation groups:** `CreateProductRequest`/`UpdateProductRequest` differed
+  only by `sku` (immutable on update, sourced from the path). Rather than force an artificial group
+  split, merged them into one `catalog/dto/ProductRequest` with `sku` `@NotBlank(groups =
+  OnCreate.class)`; `CatalogController` validates `createProduct` against `@Validated(OnCreate.class)`
+  and `replaceProduct` against `@Validated(OnUpdate.class)`. Deliberate, documented deviation from the
+  "one DTO per action" naming convention — considered and rejected: skipping groups entirely, and a
+  Javadoc-only illustration with no real endpoint.
+- Bean Validation added to every remaining request record: `CreateCategoryRequest` (`@NotBlank name`),
+  `PlaceOrderRequest` (`@NotBlank orderNumber`, `@NotBlank @Email customerEmail`, `@Valid @NotNull
+  shippingAddress`, `@NotEmpty List<@Valid> lines`), `OrderLineRequest` (`@NotBlank sku`, `@Positive
+  quantity`), `AddressRequest` (`@NotBlank` on everything but `line2`), `UpdateOrderStatusRequest`
+  (`@NotNull status`), `ProductFilter` (`@PositiveOrZero minPrice`/`maxPrice`, the query-object
+  cascading-`@Valid` case). `AppProperties` already carried `@Validated` since U1.3 — no change needed
+  there.
+- `CatalogController` / `OrderController`: `@Valid` on every `@RequestBody` and on the
+  `@ParameterObject ProductFilter`; `@NotBlank` directly on `CatalogController`'s discrete
+  `@PathVariable`s; `@Email` on `OrderController`'s optional `customerEmail` `@RequestParam`. Neither
+  controller carries class-level `@Validated` — see the two gotchas below.
+- **Gotcha 1 (lessons.md): two different exceptions for two different triggers.** A `@Valid`
+  `@RequestBody` failure throws `MethodArgumentNotValidException`; a constrained `@PathVariable`/
+  `@RequestParam` failure throws `HandlerMethodValidationException` (Spring Framework 6.1+) — **not**
+  `jakarta.validation.ConstraintViolationException`, the type pre-6.1 examples show catching.
+- **Gotcha 2 (lessons.md): class-level `@Validated` is the wrong tool here.** First draft added
+  `@Validated` to both controller classes to "turn on" path/query param validation. That is
+  unnecessary — MVC validates a constrained parameter natively since 6.1 — and actively wrong: it
+  activates the older Spring AOP method-validation interceptor instead (the mechanism `@Validated`
+  `@Service` beans use), which CGLIB-proxies the controller and throws a plain
+  `ConstraintViolationException` on every call, preempting the newer mechanism entirely. Confirmed by
+  running it (empty `400` bodies, no `errors` extension, since the advice had no handler for that
+  type). Fixed by removing the class-level annotation; the per-parameter constraints alone are
+  sufficient.
+- **Gotcha 3 (lessons.md): a named validation group replaces `Default`, it does not add to it.**
+  First version of `ProductRequest.OnCreate`/`OnUpdate` did not extend `Default`. Naming `OnCreate`
+  explicitly on `@Validated` meant every unqualified constraint (`name`, `price`, `categoryName` —
+  anything with no `groups` attribute, which belongs to `Default`) silently stopped being checked on
+  create. A blank name and a zero price passed straight through to the service. Caught by
+  `invalidCreateBodyReturns400WithFieldErrors` failing with a `500`/NPE (the mocked service returned
+  `null`, unstubbed, because the controller never should have called it). Fixed by declaring both
+  groups `extends Default`.
+- Tests: `CatalogControllerTest` +3 (`invalidCreateBodyReturns400WithFieldErrors`,
+  `blankPathVariableReturns400ViaHandlerMethodValidation`, `createDuplicateSkuReturns409ViaTheCentralAdvice`
+  — the last proves 409 now comes from the advice, not `@ResponseStatus`), `OrderControllerTest` +2
+  (`emptyLinesReturns400WithFieldErrors` — a top-level `@NotEmpty` plus a cascaded nested `@Valid`
+  failure together, asserting both `lines` and `shippingAddress.line1` in the same `errors` array;
+  `malformedCustomerEmailFilterReturns400`). `CatalogApiIT` / `OrderApiIT` +1 each, asserting the
+  `application/problem+json` content type and `errors` shape end-to-end against real Oracle.
+- Docs: `README.md` new `### 4.2` section (advice table, the two validation-trigger gotchas, the
+  groups example + why `extends Default` matters, a `curl` example of the `ProblemDetail` shape); the
+  4.1 endpoint table and "error mapping is a stopgap" paragraph updated to point here.
+  `lessons.md`: the three gotchas above.
+- `./mvnw -pl spring-boot-training verify` → surefire 59 (+5: `CatalogControllerTest` 6→9,
+  `OrderControllerTest` 5→7), failsafe 58 (+2: `CatalogApiIT`, `OrderApiIT`). All touched files
+  reformatted via the `idea` MCP.
+
+**Follow-up (same session, done)** — user instruction: don't leave `CreateCategoryRequest` as the
+odd one out; give it the same treatment as `Create/UpdateProductRequest`. Replaced it with
+`catalog/dto/CategoryRequest` (`name`, `description`), `name` `@NotBlank(groups = OnCreate.class)`,
+both groups `extends Default` — identical shape and reasoning to `ProductRequest`. This meant adding
+the endpoint categories had been missing: `PUT /api/v1/categories/{name}`
+(`CatalogService.replaceCategory`, updates `description` only — `name` is the natural key, sourced
+from the path). `CatalogController.createCategory` now validates against `@Validated(OnCreate.class)`.
+Tests: `CatalogControllerTest` +3 (`invalidCreateCategoryBodyReturns400WithFieldErrors`,
+`replaceCategoryReturns200`, `replaceUnknownCategoryReturns404`), `CatalogApiIT` +1
+(`createThenReplaceCategoryRoundTrips`, plus its `@AfterEach` now also cleans up `API-%` categories).
+`./mvnw -pl spring-boot-training verify` → surefire 62 (+3), failsafe 59 (+1), BUILD SUCCESS. All
+touched files reformatted via the `idea` MCP.
 
 ### Refactor — package split: `catalog` / `order` / `common` (done)
 

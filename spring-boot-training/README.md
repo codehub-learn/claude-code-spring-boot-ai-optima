@@ -792,7 +792,7 @@ The first HTTP layer on the `catalog` slice: `CatalogController` and `OrderContr
 `config.web` package (CORS, config-driven paging, OpenAPI metadata). DTOs and mapping are kept **thin** — plain `*Request` / `*Response`
 records and hand-written `@Component` mappers (`CatalogWebMapper`, `OrderWebMapper`); U4.3 reshapes the records (Jackson 3, `@JsonView`,
 nested
-order lines, PATCH bodies) and U4.4 moves the mapping to MapStruct. Bean Validation is U4.2.
+order lines, PATCH bodies) and U4.4 moves the mapping to MapStruct. Bean Validation and central error handling are U4.2.
 
 **Endpoints.**
 
@@ -800,12 +800,13 @@ order lines, PATCH bodies) and U4.4 moves the mapping to MapStruct. Bean Validat
 |---------------------------------------------|----------------------------------------------------------------|-------------------------------------|--------------------------------|
 | `GET /api/v1/products`                      | `ProductFilter` + `Pageable` query params (`@ParameterObject`) | `200` `PagedModel<ProductResponse>` | —                              |
 | `GET /api/v1/products/{sku}`                | `@PathVariable`                                                | `200`                               | `404`                          |
-| `POST /api/v1/products`                     | `@RequestBody CreateProductRequest`                            | `201` + `Location`                  | `409` duplicate sku            |
-| `PUT /api/v1/products/{sku}`                | path + body                                                    | `200`                               | `404`                          |
+| `POST /api/v1/products`                     | `@RequestBody ProductRequest` (`OnCreate` group)                | `201` + `Location`                  | `400` invalid, `409` duplicate sku |
+| `PUT /api/v1/products/{sku}`                | path + `ProductRequest` (`OnUpdate` group)                     | `200`                               | `400` invalid, `404`           |
 | `DELETE /api/v1/products/{sku}`             | `@PathVariable`                                                | `204`                               | `404`                          |
 | `GET /api/v1/categories`                    | —                                                              | `200` `List<CategoryResponse>`      | —                              |
 | `GET /api/v1/categories/{name}`             | `@PathVariable`                                                | `200`                               | `404`                          |
-| `POST /api/v1/categories`                   | `@RequestBody CreateCategoryRequest`                           | `201` + `Location`                  | `409`                          |
+| `POST /api/v1/categories`                   | `@RequestBody CategoryRequest` (`OnCreate` group)              | `201` + `Location`                  | `400` invalid, `409`           |
+| `PUT /api/v1/categories/{name}`             | path + `CategoryRequest` (`OnUpdate` group)                    | `200`                               | `400` invalid, `404`           |
 | `POST /api/v1/orders`                       | `@RequestBody PlaceOrderRequest`                               | `201` + `Location`                  | `404` unknown customer/product |
 | `GET /api/v1/orders/{orderNumber}`          | `@PathVariable`                                                | `200`                               | `404`                          |
 | `GET /api/v1/orders`                        | `?customerEmail=&status=` (`@RequestParam`)                    | `200` `List<OrderResponse>`         | —                              |
@@ -831,10 +832,9 @@ unstable JSON contract and Spring Data logs a warning.
 only message converter on the classpath, so an `Accept: application/xml` request is answered
 `406 Not Acceptable` by MVC, no controller code involved.
 
-**Error mapping is a U4.1 stopgap.** `NotFoundException` carries `@ResponseStatus(NOT_FOUND)`
-and `CatalogDuplicateException` `@ResponseStatus(CONFLICT)` so the failure paths work and are
-testable now. U4.2 removes both annotations and routes the exceptions through a central
-`@RestControllerAdvice` as RFC 9457 `ProblemDetail`.
+**Error mapping was a U4.1 stopgap**, `@ResponseStatus` on `NotFoundException` and
+`CatalogDuplicateException`. U4.2 (below) removes both and routes every exception through a
+central `@RestControllerAdvice` as RFC 9457 `ProblemDetail`.
 
 **OpenAPI.** `springdoc-openapi-starter-webmvc-ui` (3.1.1 — the 3.x line targets Spring Boot 4 /
 Spring Framework 7; not Boot-BOM-managed, pinned via `springdoc-openapi.version` in the reactor
@@ -888,3 +888,98 @@ the projections genuinely package-private. Real boundary enforcement would need 
 `@ManyToOne Product` and `OrderFactory` reads `ProductRepository` to price a line at order time.
 `PersistenceConfig`'s `@EnableJpaRepositories` now lists both feature packages. Pure move — no
 behaviour change; the `CatalogDomainMappingIT` graph test moved to `order` as `DomainGraphMappingIT`.
+
+### 4.2 Exception handling & validation
+
+U4.1 shipped two `@ResponseStatus` stopgaps. This step removes both and turns on real Jakarta Bean
+Validation everywhere a request enters the API: request bodies, path variables, and query params.
+
+**Central error handling.** New `config.web.ApiExceptionHandler extends ResponseEntityExceptionHandler`,
+`@RestControllerAdvice`, the one place any exception becomes an RFC 9457 `ProblemDetail`:
+
+| Thrown by                                                      | `@ExceptionHandler`                        | Status |
+|-----------------------------------------------------------------|--------------------------------------------|--------|
+| `NotFoundException`                                              | direct                                     | `404`  |
+| `CatalogDuplicateException`                                      | direct                                     | `409`  |
+| `MethodArgumentNotValidException` (a `@Valid` body failure)      | overrides the `ResponseEntityExceptionHandler` method | `400`  |
+| `HandlerMethodValidationException` (a `@Validated` param failure)| overrides the `ResponseEntityExceptionHandler` method | `400`  |
+| anything else                                                    | catch-all, logged at ERROR                 | `500`  |
+
+The two validation overrides attach an `errors` extension to the `ProblemDetail` — a JSON array of
+`{"field": ..., "message": ...}` built from `BindingResult.getFieldErrors()` (body) or
+`HandlerMethodValidationException.getParameterValidationResults()` (params). Both a top-level and a
+cascaded nested-body violation report the same shape, e.g. `shippingAddress.line1` or
+`lines[0].quantity`.
+
+**Two different exceptions for two different validation triggers — a common trap.** A `@Valid`
+`@RequestBody` failure throws `MethodArgumentNotValidException`, unchanged since Spring 6. A
+`@Validated`/constrained `@PathVariable` or `@RequestParam` failure throws
+`HandlerMethodValidationException` — **not** `jakarta.validation.ConstraintViolationException`,
+which is what `jakarta.validation.Validator` throws directly and what older Spring examples
+(pre-6.1) show catching. `ApiExceptionHandler` only handles the newer type.
+
+**Do not add class-level `@Validated` to a controller just to validate its `@PathVariable`s.**
+Spring MVC validates a constrained `@PathVariable`/`@RequestParam` natively since Framework 6.1,
+with no class-level annotation required. Adding `@Validated` on the class instead activates the
+older Spring AOP method-validation interceptor (`MethodValidationPostProcessor` /
+`MethodValidationInterceptor`, the same mechanism `@Validated`-annotated `@Service` beans use) —
+that interceptor wraps every call to the (now CGLIB-proxied) controller and throws a plain
+`ConstraintViolationException` instead, bypassing the newer mechanism entirely. Confirmed by
+running it: adding `@Validated` to `CatalogController` turned the intended `400` response bodies
+empty, because `ApiExceptionHandler` had no handler for that exception type. Both controllers here
+carry constraints directly on the parameter (`@PathVariable @NotBlank String sku`,
+`@RequestParam @Email String customerEmail`) and no class-level `@Validated`.
+
+**Validation groups — `catalog.dto.ProductRequest`.** `CreateProductRequest`/`UpdateProductRequest`
+differed only in `sku` (immutable on update, sourced from the path). Rather than keep two
+near-identical records, they were merged into one `ProductRequest`, with `sku` required only in the
+`OnCreate` group:
+
+```java
+public record ProductRequest(
+        @NotBlank(groups = OnCreate.class) String sku,
+        @NotBlank String name,
+        @Nullable String description,
+        @Positive BigDecimal price,
+        @NotBlank String categoryName) {
+    public interface OnCreate extends Default {}
+    public interface OnUpdate extends Default {}
+}
+```
+
+`CatalogController` validates `createProduct` against `@Validated(OnCreate.class)` and
+`replaceProduct` against `@Validated(OnUpdate.class)`. **The `extends Default` matters**: naming an
+explicit group on `@Validated` *replaces* the implicit `Default` group rather than adding to it. The
+first version of this omitted `extends Default`, and the create endpoint silently accepted a blank
+`name` and a zero `price` — every unqualified constraint (the ones with no `groups` attribute, which
+belong to `Default`) stopped being checked the moment `OnCreate` was named explicitly. Confirmed by
+a failing slice test before the fix.
+
+**Follow-up — the same treatment for categories.** `CreateCategoryRequest` was a single-purpose
+DTO with no update counterpart, left inconsistent with the `ProductRequest` merge above. It was
+replaced the same way: one `catalog.dto.CategoryRequest` (`name`, `description`), `name`
+`@NotBlank(groups = OnCreate.class)`, both groups `extends Default`. This also meant adding the
+endpoint that had been missing — `PUT /api/v1/categories/{name}`, which only ever changes
+`description` (`name` is the natural key, sourced from the path, exactly like `sku` on
+`replaceProduct`). `CatalogService.replaceCategory` is the new use case.
+
+**Query-object validation.** `ProductFilter`'s `minPrice`/`maxPrice` carry `@PositiveOrZero`; the
+controller's `@Valid` on the `@ParameterObject` parameter cascades into them — the query-parameter
+counterpart to `@Valid` on a request body.
+
+```bash
+curl -i -X POST localhost:8080/api/v1/products -H 'Content-Type: application/json' \
+  -d '{"sku":"X","name":"","price":-1,"categoryName":"Storage"}'
+# HTTP/1.1 400, Content-Type: application/problem+json
+# {"type":"about:blank","title":"Bad Request","status":400,"detail":"Invalid request content.",
+#  "instance":"/api/v1/products","errors":[{"field":"name","message":"must not be blank"},
+#  {"field":"price","message":"must be greater than 0"}]}
+```
+
+**Verification.** New slice cases: `CatalogControllerTest` (+3: invalid create body, blank path
+variable, duplicate-sku 409 via the advice), `OrderControllerTest` (+2: empty lines + blank nested
+address, invalid `@Email` filter). New IT cases: `CatalogApiIT` / `OrderApiIT` (+1 each) assert the
+`application/problem+json` content type and `errors` shape end-to-end against real Oracle.
+`./mvnw -pl spring-boot-training verify` → surefire 62 (+3 for the category follow-up:
+`replaceCategoryReturns200`, `replaceUnknownCategoryReturns404`, `invalidCreateCategoryBodyReturns400WithFieldErrors`),
+failsafe 59 (+1: `createThenReplaceCategoryRoundTrips`), BUILD SUCCESS.

@@ -13,9 +13,9 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * U4.1 HTTP integration test for the catalog endpoints: the real context + {@code config.web.WebConfig} + Oracle + the {@code R__010}
- * Flyway baseline (6 categories, 24 products), driven through {@link MockMvcTester}. RestAssured against a real port and the OpenAPI spec
- * check are U4.5.
+ * U4.1/U4.2 HTTP integration test for the catalog endpoints: the real context + {@code config.web.WebConfig} +
+ * {@code config.web.ApiExceptionHandler} + Oracle + the {@code R__010} Flyway baseline (6 categories, 24 products), driven through
+ * {@link MockMvcTester}. RestAssured against a real port and the OpenAPI spec check are U4.5.
  */
 @AutoConfigureMockMvc
 class CatalogApiIT extends AbstractOracleIntegrationTest {
@@ -29,6 +29,7 @@ class CatalogApiIT extends AbstractOracleIntegrationTest {
 	@AfterEach
 	void cleanUp() {
 		jdbcClient.sql("delete from product where sku like 'API-%'").update();
+		jdbcClient.sql("delete from category where name like 'API-%'").update();
 	}
 
 	@Test
@@ -67,5 +68,35 @@ class CatalogApiIT extends AbstractOracleIntegrationTest {
 		assertThat(mvc.get().uri("/api/v1/categories"))
 				.hasStatusOk()
 				.bodyJson().extractingPath("$").asArray().hasSizeGreaterThanOrEqualTo(6);
+	}
+
+	@Test
+	void invalidCreateBodyReturnsAProblemDetailWithFieldErrors() {
+		final String body = """
+							{"sku":"API-INVALID","name":"","description":null,"price":-1,"categoryName":"Storage"}""";
+
+		assertThat(mvc.post().uri("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content(body))
+				.hasStatus(HttpStatus.BAD_REQUEST)
+				.hasContentType(MediaType.APPLICATION_PROBLEM_JSON)
+				.bodyJson().extractingPath("$.errors[*].field").asArray().contains("name", "price");
+	}
+
+	@Test
+	void createThenReplaceCategoryRoundTrips() {
+		final String createBody = """
+								  {"name":"API-RT-Category","description":"created by CatalogApiIT"}""";
+
+		assertThat(mvc.post().uri("/api/v1/categories").contentType(MediaType.APPLICATION_JSON).content(createBody))
+				.hasStatus(HttpStatus.CREATED)
+				.hasHeader("Location", "http://localhost/api/v1/categories/API-RT-Category");
+
+		final String replaceBody = """
+								   {"name":"API-RT-Category","description":"replaced by CatalogApiIT"}""";
+
+		assertThat(mvc.put().uri("/api/v1/categories/{name}", "API-RT-Category")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content(replaceBody))
+				.hasStatusOk()
+				.bodyJson().extractingPath("$.description").isEqualTo("replaced by CatalogApiIT");
 	}
 }

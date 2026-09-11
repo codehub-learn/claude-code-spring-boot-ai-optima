@@ -1,16 +1,12 @@
 package gr.codelearn.springbootai.training.catalog.internal;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.ResponseStatus;
-
 /**
  * A create request collides with an existing row on its business key — a product {@code sku} or a category {@code name} that is already
  * taken. Unchecked, so the service transaction rolls back.
  *
- * <p><b>U4.1 stopgap:</b> {@code @ResponseStatus(CONFLICT)} maps it straight to {@code 409} for now. U4.2 removes the annotation and
- * routes it through the central {@code @RestControllerAdvice} as an RFC 9457 {@code ProblemDetail}, next to {@link NotFoundException}.
+ * <p>Mapped to a {@code 409} RFC 9457 {@code ProblemDetail} by {@code config.web.ApiExceptionHandler} (U4.2), next to
+ * {@link NotFoundException}. No {@code @ResponseStatus} here either — see that class's Javadoc for why.
  */
-@ResponseStatus(HttpStatus.CONFLICT)
 public class CatalogDuplicateException extends RuntimeException {
 
 	public CatalogDuplicateException(final String message) {

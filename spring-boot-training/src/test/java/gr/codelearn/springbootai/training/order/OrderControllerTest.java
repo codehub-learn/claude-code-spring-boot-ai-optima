@@ -23,9 +23,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 /**
- * U4.1 slice test for {@link OrderController}. The real {@link OrderWebMapper} is imported (it is a plain record→record converter);
+ * U4.1/U4.2 slice test for {@link OrderController}. The real {@link OrderWebMapper} is imported (it is a plain record→record converter);
  * {@link OrderService} is mocked. Covers {@code POST → 201 + Location}, read-back, the {@code PATCH} status transition, the {@code 404}
- * failure path, and a malformed body → {@code 400}.
+ * failure path, a malformed body → {@code 400}, and (U4.2) a {@code @Valid} nested-body failure and an invalid {@code @Email} query param.
  */
 @WebMvcTest(controllers = OrderController.class,
 			excludeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = WebMvcConfigurer.class))
@@ -89,5 +89,27 @@ class OrderControllerTest {
 	void malformedBodyReturns400() {
 		assertThat(mvc.post().uri("/api/v1/orders").contentType(MediaType.APPLICATION_JSON).content("{ not json"))
 				.hasStatus(HttpStatus.BAD_REQUEST);
+	}
+
+	@Test
+	void emptyLinesReturns400WithFieldErrors() {
+		// @NotEmpty on lines + @NotBlank on the nested AddressRequest.line1 — a top-level and a cascaded @Valid failure together.
+		assertThat(mvc.post().uri("/api/v1/orders")
+					  .contentType(MediaType.APPLICATION_JSON)
+					  .content("""
+							     {"orderNumber":"API-1","customerEmail":"alice@example.com",
+							   "shippingAddress":{"line1":"","line2":null,"city":"Town","postalCode":"00001","country":"US"},
+							   "lines":[]}
+							   """))
+				.hasStatus(HttpStatus.BAD_REQUEST)
+				.bodyJson()
+				.extractingPath("$.errors[*].field")
+				.asArray()
+				.contains("lines", "shippingAddress.line1");
+	}
+
+	@Test
+	void malformedCustomerEmailFilterReturns400() {
+		assertThat(mvc.get().uri("/api/v1/orders").param("customerEmail", "not-an-email")).hasStatus(HttpStatus.BAD_REQUEST);
 	}
 }

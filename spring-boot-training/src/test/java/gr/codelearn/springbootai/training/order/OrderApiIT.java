@@ -13,7 +13,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * U4.1 HTTP integration test for the order endpoints against real Oracle + the {@code R__010}/{@code R__020} baseline. Not
+ * U4.1/U4.2 HTTP integration test for the order endpoints against real Oracle + the {@code R__010}/{@code R__020} baseline. Not
  * {@code @Transactional} — {@code OrderService.placeOrder} commits and the {@code AFTER_COMMIT} listener fires; {@code API-}-prefixed order
  * numbers are cleaned up in {@link #cleanUp()} (the {@code OrderTransactionSemanticsIT} precedent).
  */
@@ -66,5 +66,19 @@ class OrderApiIT extends AbstractOracleIntegrationTest {
 	@Test
 	void getUnknownOrderReturns404() {
 		assertThat(mvc.get().uri("/api/v1/orders/{n}", "API-DOES-NOT-EXIST")).hasStatus(HttpStatus.NOT_FOUND);
+	}
+
+	@Test
+	void invalidPlaceBodyReturnsAProblemDetailWithFieldErrors() {
+		final String body = """
+							{"orderNumber":"%s","customerEmail":"not-an-email",
+							 "shippingAddress":{"line1":"1 Way","line2":null,"city":"Town","postalCode":"00001","country":"US"},
+							 "lines":[{"sku":"LAP-0001","quantity":0}]}
+							""".formatted(orderNumber);
+
+		assertThat(mvc.post().uri("/api/v1/orders").contentType(MediaType.APPLICATION_JSON).content(body))
+				.hasStatus(HttpStatus.BAD_REQUEST)
+				.hasContentType(MediaType.APPLICATION_PROBLEM_JSON)
+				.bodyJson().extractingPath("$.errors[*].field").asArray().contains("customerEmail", "lines[0].quantity");
 	}
 }

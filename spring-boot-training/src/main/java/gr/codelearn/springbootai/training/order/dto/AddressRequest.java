@@ -1,5 +1,6 @@
 package gr.codelearn.springbootai.training.order.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -7,9 +8,9 @@ import org.jspecify.annotations.Nullable;
  * the web contract does not import the persistence value object directly; {@code OrderWebMapper} bridges the two.
  */
 public record AddressRequest(
-		String line1,
+		@NotBlank String line1,
 		@Nullable String line2,
-		String city,
-		String postalCode,
-		String country) {
+		@NotBlank String city,
+		@NotBlank String postalCode,
+		@NotBlank String country) {
 }
