@@ -1129,6 +1129,7 @@ wired in the reactor parent's `maven-compiler-plugin` `pluginManagement`, ahead 
 nested association:
 
 ```java
+
 @Mapping(target = "categoryName", source = "category.name")
 ProductResponse toResponse(Product product);
 ```
@@ -1155,6 +1156,7 @@ call a `void` mapper method that takes the DTO plus `@MappingTarget` and mutates
 place:
 
 ```java
+
 @Mapping(target = "category", ignore = true)
 void updateEntityFromRequest(ProductRequest request, @MappingTarget Product product);
 
@@ -1194,10 +1196,11 @@ computes the same thing) is package-private in `order`, unreachable from `order.
 as a MapStruct expression instead of a new public method:
 
 ```java
+
 @Mapping(target = "sku", source = "product.sku")
 @Mapping(target = "productName", source = "product.name")
 @Mapping(target = "lineTotal",
-        expression = "java(item.getUnitPrice().multiply(java.math.BigDecimal.valueOf(item.getQuantity())))")
+		expression = "java(item.getUnitPrice().multiply(java.math.BigDecimal.valueOf(item.getQuantity())))")
 OrderLineResponse toResponse(OrderItem item);
 ```
 
@@ -1233,5 +1236,85 @@ zero-`@Mapping` nested+collection `toCommand`, the `default`-method summary resp
 regressions), failsafe 61 (unchanged — `CatalogApiIT`'s existing PATCH/PUT round-trips are the
 end-to-end proof that the generated update methods behave exactly like the manual code they
 replaced).
-`./mvnw -pl spring-boot-training verify` → surefire 67 (+5), failsafe 61 (+2), BUILD SUCCESS. All
-touched files reformatted via the `idea` MCP.
+
+### 4.5 API testing
+
+The last U4 topic closes three gaps the checklist names. Two were already covered by the time this
+step started — `@WebMvcTest`/`MockMvcTester` slices per controller (`CatalogControllerTest`, 16
+cases; `OrderControllerTest`, 8 cases), each with a happy path and several failure paths, built up
+across U4.1–U4.4 — so this step adds only what both `CatalogApiIT`'s and `OrderApiIT`'s own Javadoc
+had been pointing at all along: a RestAssured `*IT` against a real port, and an OpenAPI spec sanity
+check.
+
+**RestAssured vs. `MockMvcTester` — a real HTTP round trip, not an in-process dispatch.**
+`MockMvcTester` (used by every `*ApiIT` through U4.4) never opens a socket — requests are dispatched
+straight into the servlet container in the same JVM. `RestAssuredApiIT` is the counterpart that
+does: `@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)` starts a real embedded Tomcat on
+an OS-assigned port, `@LocalServerPort` captures it, and RestAssured's `given()/when()/then()` DSL
+drives real HTTP requests against it — headers, status line, body, all serialized and parsed for
+real. One class, not one per resource: `RANDOM_PORT` is a different Spring TestContext cache key from
+every other `@SpringBootTest` in the module (all default `MOCK`), so this is the one place in the
+suite that pays for a second, real-server context — combining the catalog and order happy paths into
+one class means that cost is paid once. Every failure path is already covered by the `MockMvcTester`
+tests, so duplicating them here through a different client would test the client, not the app.
+
+```java
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+class RestAssuredApiIT extends AbstractOracleIntegrationTest {
+
+	@LocalServerPort
+	private int port;
+
+	@BeforeEach
+	void configureRestAssured() {
+		RestAssured.port = port;
+	}
+
+	@Test
+	void createThenGetProductRoundTrips() {
+		given().contentType(ContentType.JSON).body(body)
+				.when().post("/api/v1/products")
+				.then().statusCode(201).header("Location", "http://localhost:" + port + "/api/v1/products/RA-1");
+		// ...
+	}
+}
+```
+
+Redeclaring `@SpringBootTest` on the subclass (rather than only inheriting
+`AbstractOracleIntegrationTest`'s default `MOCK` one) is the supported way to override just
+`webEnvironment` — Spring resolves the *nearest* `@SpringBootTest` in the class hierarchy, so this
+one wins outright, while the parent's `@ServiceConnection` Oracle field and `@ActiveProfiles("test")`
+are still inherited (plain Java field/annotation inheritance, unaffected by which `@SpringBootTest`
+governs the context).
+
+**Dependency finding: REST Assured dropped out of the Spring Boot BOM.** Boot's dependencies BOM
+manages `rest-assured.version` and imports `rest-assured-bom` through the 3.x line — confirmed by
+grepping the actual `~/.m2` BOM poms — but **not** in 4.1.1; nothing in that generation's `pluginManagement`
+mentions it at all. Pinned in the reactor the same way as `mapstruct.version`/`springdoc-openapi.version`:
+`rest-assured.version = 6.0.1`, the version that "rounds out Jackson 3 support" on top of 6.0.0's
+Spring 7 baseline — the right pin given this app is Jackson 3 end-to-end. Only the base
+`io.rest-assured:rest-assured` module is pulled; `rest-assured-spring-mock-mvc` is not used (and
+would not work here regardless — its `javax.servlet`-based bridge predates Spring Framework 7's move
+to `jakarta.servlet`).
+
+**OpenAPI spec sanity check, not a contract test.** `OpenApiSpecIT` asserts `GET /v3/api-docs` exists
+and is shaped right — `$.info.title` matches `OpenApiConfig`'s document metadata, `$.tags[*].name`
+lists `catalog`/`orders`, and `$.paths` has an entry for every resource this unit built (bracketed
+JsonPath keys — `$.paths['/api/v1/products']` — because dot notation breaks on the `/` inside a path
+key). A third test confirms `/swagger-ui.html` actually resolves to something (a `3xx` redirect to
+`/swagger-ui/index.html`, confirmed by running the test rather than assumed). Deliberately not a full
+contract test: restating every `@Operation`/`@ApiResponse` annotation as an assertion would break on
+every harmless controller change for no real safety gained. Runs `@AutoConfigureMockMvc` on the
+default `MOCK` web environment, so it reuses the same cached context as `CatalogApiIT`/`OrderApiIT` —
+no extra Oracle container or context startup cost, unlike `RestAssuredApiIT`'s `RANDOM_PORT`.
+
+```bash
+./mvnw -pl spring-boot-training verify -Dit.test=RestAssuredApiIT,OpenApiSpecIT -DfailIfNoTests=false -Dsurefire.skip=true
+```
+
+**Verification.** New failsafe-only classes (both in the root test package — they span both
+`catalog` and `order`, so neither belongs to one feature package): `RestAssuredApiIT` (2: product
+create+get, order place+get), `OpenApiSpecIT` (3: document metadata, every resource's path present,
+the Swagger UI redirect). `./mvnw -pl spring-boot-training verify` → surefire 75 (unchanged — no new
+slice tests; that coverage already existed), failsafe 66 (+5), BUILD SUCCESS. This closes out U4.

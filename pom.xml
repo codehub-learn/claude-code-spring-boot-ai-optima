@@ -53,6 +53,11 @@
 		     for Spring Boot 4 / Spring Framework 7; 3.1.1 declares Spring Boot 4 support. -->
 		<springdoc-openapi.version>3.1.1</springdoc-openapi.version>
 
+		<!-- REST Assured (U4.5): HTTP-client-driven API tests against a real port. Spring Boot's BOM managed this through
+		     the 3.x line (rest-assured.version / an imported rest-assured-bom) but drops it in 4.1 - pinned here instead.
+		     6.0.0 raised the baseline to Java 17+ and added Spring 7 / Jackson 3 support; 6.0.1 rounds that out. -->
+		<rest-assured.version>6.0.1</rest-assured.version>
+
 		<!-- Maven plugins (versions not managed by Spring Boot) -->
 		<jacoco-maven-plugin.version>0.8.13</jacoco-maven-plugin.version>
 

@@ -139,6 +139,17 @@
 			<scope>test</scope>
 		</dependency>
 
+		<!-- REST Assured (U4.5): the real-HTTP-client counterpart to MockMvcTester, driving RestAssuredApiIT against a
+		     random port with Testcontainers Oracle underneath. Not in the Spring Boot 4.1 BOM (see the reactor property
+		     comment) - version pinned via rest-assured.version. Only the base module: no rest-assured-spring-mock-mvc,
+		     whose javax.servlet-based module is incompatible with Spring Framework 7's jakarta.servlet. -->
+		<dependency>
+			<groupId>io.rest-assured</groupId>
+			<artifactId>rest-assured</artifactId>
+			<version>${rest-assured.version}</version>
+			<scope>test</scope>
+		</dependency>
+
 		<!-- Web MVC test slice (U4.1). Boot 4.1 keeps @WebMvcTest / @AutoConfigureMockMvc / MockMvcTester in
 		     their own module - spring-boot-starter-test does NOT pull it (same split as the U3.6 persistence
 		     slices). Needed by the *ControllerTest slices and the @AutoConfigureMockMvc *ApiIT tests. -->

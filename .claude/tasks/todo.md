@@ -96,7 +96,7 @@ separate and out of scope here — no AI code in this wave.
 - [x] **4.4 Request / Response mapping** — MapStruct mappers (`componentModel = "spring"`),
   entity ↔ DTO, nested + collection mapping, update-entity-from-DTO (`@MappingTarget`),
   `Page<Entity>` → `Page<Response>` helper.
-- [ ] **4.5 API testing** — `@WebMvcTest` / `MockMvcTester` slice tests per controller (happy +
+- [x] **4.5 API testing** — `@WebMvcTest` / `MockMvcTester` slice tests per controller (happy +
   one failure path each), RestAssured `*IT` against Testcontainers for the happy path, an
   OpenAPI spec sanity check.
 
@@ -871,3 +871,37 @@ unchanged. `./mvnw -pl spring-boot-training verify` green. README follow-up subs
 - `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 75 (+8: `CatalogWebMapperTest` 5, `OrderWebMapperTest` 3), failsafe
   61 (unchanged — `CatalogApiIT`'s existing PATCH/PUT round-trips are the end-to-end proof the generated update methods behave like the
   manual code they replaced). All touched files reformatted via the `idea` MCP.
+
+### 4.5 API testing (done) — closes out U4
+
+- Two of the three checklist bullets were already satisfied by U4.1–U4.4: `@WebMvcTest`/`MockMvcTester` slices per controller
+  (`CatalogControllerTest` 16 cases, `OrderControllerTest` 8 cases), each with a happy path and several failure paths. Confirmed by
+  re-reading both `CatalogApiIT`/`OrderApiIT`'s own Javadoc, which explicitly deferred "RestAssured against a real port and the OpenAPI
+  spec check" to this unit — so only those two were left to build.
+- **Dependency finding, verified against the actual `~/.m2` BOM poms (not assumed):** Spring Boot's dependencies BOM manages
+  `rest-assured.version` / imports `rest-assured-bom` through the 3.x line but **not** in 4.1.1 — grepping both poms confirms the entry
+  is simply absent from 4.x. Pinned in the reactor `pom.xml` the same way as `mapstruct.version`/`springdoc-openapi.version`:
+  `rest-assured.version = 6.0.1` (per a web search — 6.0.0 raised the baseline to Java 17+ and added Spring 7/Jackson 3 support, 6.0.1
+  rounds that out), and only the base `io.rest-assured:rest-assured` test dependency (not `rest-assured-spring-mock-mvc`, whose
+  `javax.servlet` bridge predates Spring Framework 7's `jakarta.servlet`). `dependency:tree` confirmed no Jackson conflict — 6.0.1 pulls
+  no `jackson-databind` of its own at all.
+- New `RestAssuredApiIT` (root test package `gr.codelearn.springbootai.training` — it spans both `catalog` and `order`, so it doesn't
+  belong to either feature package): `@SpringBootTest(webEnvironment = RANDOM_PORT)` (redeclared on the subclass, the supported way to
+  override just `webEnvironment` — Spring resolves the *nearest* `@SpringBootTest` in the hierarchy) `extends AbstractOracleIntegrationTest`
+  (inherits its `@ServiceConnection` Oracle field and `@ActiveProfiles("test")` via plain Java inheritance), `@LocalServerPort` (confirmed
+  present at `org.springframework.boot.test.web.server.LocalServerPort` in the actual 4.1.1 jar — same package as Boot 3.x) set on
+  `RestAssured.port` in `@BeforeEach`. One class, not one per resource: `RANDOM_PORT` is a distinct TestContext cache key from every other
+  `@SpringBootTest` in the module (all `MOCK`), so this is the only place that pays for a second real-server context; two happy-path tests
+  (product create+get, order place+get) via `given()/when()/then()`, `RA-`-prefixed rows cleaned up in `@AfterEach` via `JdbcClient`
+  (distinct from the existing `API-` prefix so cleanup never depends on ordering against `CatalogApiIT`/`OrderApiIT`).
+- New `OpenApiSpecIT` (same root package): `@AutoConfigureMockMvc` on the default `MOCK` environment (reuses the same cached context as
+  `CatalogApiIT`/`OrderApiIT`, no extra Oracle/context cost). Asserts `GET /v3/api-docs`'s `$.info.title`, `$.tags[*].name`, and a
+  `$.paths['/api/v1/...']` entry per resource built across U4 (bracketed JsonPath — dot notation breaks on the `/` in a path key); a third
+  test hit `/swagger-ui.html` expecting `2xxSuccessful` and got `REDIRECTION` on the first run (empirical, not guessed) — fixed to
+  `hasStatus3xxRedirection()`, since springdoc redirects to `/swagger-ui/index.html` rather than serving the page directly. Deliberately
+  not a full contract test — no per-operation/response assertions that would break on every harmless controller change.
+- Docs: `README.md` new `### 4.5 API testing` section. Also cleaned up a pre-existing dangling, mid-sentence duplicate line at the very
+  end of the file (leftover artifact from an earlier session, unrelated to this unit's content) while editing that area. No `lessons.md`
+  entry — REST Assured 6.0.1 behaved exactly as the release notes said (Jackson 3 support, no conflict), no correction occurred.
+- `./mvnw -pl spring-boot-training verify` → BUILD SUCCESS: surefire 75 (unchanged — coverage already existed), failsafe 66 (+5:
+  `RestAssuredApiIT` 2, `OpenApiSpecIT` 3); all prior tests unchanged. All touched files reformatted via the `idea` MCP.
