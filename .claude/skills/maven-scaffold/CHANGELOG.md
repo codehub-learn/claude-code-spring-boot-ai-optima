@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 - 2026-09-10 12:16
+
+- Changed the indentation/formatting rule to reformat via the `idea` MCP tool instead of Spotless.
+
 ## 1.1.1 - 2026-09-04 11:08
 
 - Added a rule that web modules use `spring-boot-starter-webmvc` (the Boot 4 name), never the deprecated `spring-boot-starter-web` alias.
