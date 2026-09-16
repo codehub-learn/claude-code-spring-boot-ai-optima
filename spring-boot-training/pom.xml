@@ -216,7 +216,7 @@
 					<layers>
 						<enabled>true</enabled>
 					</layers>
-					<mainClass>gr.codelearn.springbootai.training.TrainingApplication</mainClass>
+					<mainClass>gr.codelearn.springbootai.boot.TrainingApplication</mainClass>
 				</configuration>
 				<executions>
 					<!-- build-info goal: writes META-INF/build-info.properties (group, artifact, version, build time);

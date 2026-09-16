@@ -1,5 +1,5 @@
 -- U3.2 - orders schema. Pairs with the catalog slice from V1 (category, product) and the U3.2 entities in
--- gr.codelearn.springbootai.training.catalog. Baseline seed: R__020_seed_orders.sql; demo bulk: db/demo/R__920_demo_orders.sql.
+-- gr.codelearn.springbootai.boot.catalog. Baseline seed: R__020_seed_orders.sql; demo bulk: db/demo/R__920_demo_orders.sql.
 -- Conventions (CLAUDE.md, matching V1): snake_case, singular table names, pk_/fk_/ix_/uq_/ck_ constraint prefixes,
 -- number(19) identity PKs, "default" before "not null", the created_at/updated_at/version trio on every table so the
 -- AbstractAuditableEntity mapping (JPA auditing + @Version) lands without an ALTER.

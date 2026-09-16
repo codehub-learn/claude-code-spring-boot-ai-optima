@@ -19,11 +19,11 @@ Run it:
 
 **`@SpringBootApplication`** on `TrainingApplication` is a meta-annotation that combines three:
 
-| Annotation                 | Effect                                                              |
-|----------------------------|---------------------------------------------------------------------|
-| `@SpringBootConfiguration` | marks the class as the primary `@Configuration` source              |
-| `@EnableAutoConfiguration` | activates condition-driven auto-configuration                       |
-| `@ComponentScan`           | scans this package (`gr.codelearn.springbootai.training`) and below |
+| Annotation                 | Effect                                                 |
+|----------------------------|--------------------------------------------------------|
+| `@SpringBootConfiguration` | marks the class as the primary `@Configuration` source |
+| `@EnableAutoConfiguration` | activates condition-driven auto-configuration          |
+| `@ComponentScan`           | scans this package (`boot`) and below                  |
 
 **Starters** are curated dependency aggregates; versions come from the Spring Boot BOM in the
 reactor parent, so the module pom lists starters without versions:
