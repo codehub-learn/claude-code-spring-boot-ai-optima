@@ -100,7 +100,7 @@ springdoc:
     path: /swagger-ui.html
     operations-sorter: method
     tags-sorter: alpha
-  packages-to-scan: gr.codelearn.springbootai.training
+  packages-to-scan: gr.codelearn.springbootai.boot
 
 logging:
   structured:

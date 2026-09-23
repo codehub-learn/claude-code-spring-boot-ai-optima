@@ -25,7 +25,7 @@ logging:
       console:
   level:
     root: WARN
-    gr.codelearn.springbootai.training: INFO
+    gr.codelearn.springbootai.boot: INFO
 
 # Override the validated config with test-only values so binding is exercised without depending on
 # application.yml staying put.

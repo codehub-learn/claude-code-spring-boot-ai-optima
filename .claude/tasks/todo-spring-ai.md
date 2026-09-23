@@ -35,7 +35,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## Pre-step
 
-- [ ] Scaffold `spring-ai-training` via the `maven-scaffold` skill (runnable module:
+- [x] Scaffold `spring-ai-training` via the `maven-scaffold` skill (runnable module:
   `spring-boot-maven-plugin`, register in parent `<modules>`), Spring AI BOM/starter baseline,
   compile + `./mvnw verify` green with just the bootstrap app. `spring-ai-mcp-server-training` and
   `spring-ai-mcp-server-showcase` are scaffolded later, at U6/U7 respectively — no need to stand
@@ -59,14 +59,14 @@ own module — no code here should be required for the Spring Boot units to buil
 ## U2 — Offline & Hybrid LLM Deployment
 
 - [ ] **2.1 Cloud vs offline models** — comparison notes (latency, cost, data residency) contrasting
-  Anthropic Claude (cloud) vs Ollama (offline), a `ChatModel` bean selection driven by config
-  (`spring.ai.model.chat` / a custom property) rather than hardcoded provider.
+  Anthropic Claude (cloud) vs Ollama (offline), a `ChatModel` bean selection driven by config (`spring.ai.model.chat` / a custom property)
+  rather than hardcoded provider.
 - [ ] **2.2 Model selection & quantization** — a written note on model size/quantization
   trade-offs for local inference, picking a small instruct model for the offline demo.
 - [ ] **2.3 Docker deployment** — an Ollama service wired into `compose.yaml`, health-checked like
   the existing Oracle service, plus the Spring AI Ollama starter dependency.
-- [ ] **2.4 Switching between cloud / local** — a `@ConfigurationProperties`-driven profile switch
-  (`application-local.yml` on Ollama vs a cloud profile on Anthropic) that swaps the active
+- [ ] **2.4 Switching between cloud / local** — a `@ConfigurationProperties`-driven profile switch (`application-local.yml` on Ollama vs a
+  cloud profile on Anthropic) that swaps the active
   `ChatModel` without code changes, plus a resilience note (Spring Retry / timeouts) for the
   Anthropic-backed path.
 
@@ -132,5 +132,33 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## Review
 
-_(empty until the first unit is done — see `.claude/tasks/todo-spring-boot.md` for the entry
-format.)_
+### Pre-step (done)
+
+- Registered `spring-ai-training` in the parent `<modules>` and scaffolded it as a runnable code
+  module (`gr.codelearn.springbootai.ai`), modeled on `spring-boot-training`'s pom/app/resources
+  shape but stripped down: `spring-boot-starter-webmvc` + `-actuator` + devtools only, no JPA,
+  Flyway, Oracle driver, or Spring AI starter yet — the `spring-ai-bom` is already available via
+  the parent's `<dependencyManagement>` for when U1.2/U2.1 add a model starter.
+- Deviation from a literal reading of the checklist item: per user decision, no Spring AI model
+  starter (e.g. `spring-ai-starter-model-anthropic`) was added in this step, to avoid a provider
+  autoconfiguration / API-key dependency in the bootstrap's context-loading smoke test. That lands
+  with U1.2 (`ChatClient`) / U2.1 (cloud vs offline model selection).
+- Added `AiTrainingApplication` + `StartupListener` (mirrors the sibling module's bootstrap
+  pattern), `application.yml` / `-local` / `-test`, `banner.txt`, and a plain `@SpringBootTest`
+  `AiTrainingApplicationTests.contextLoads()` (no `AbstractOracleIntegrationTest` base — no
+  datasource in this module yet).
+- Verified: `./mvnw -pl spring-ai-training -am verify` → `BUILD SUCCESS`, 1 test run, 0
+  failures/errors. All new/touched files reformatted via the `idea` MCP.
+- Follow-up found while checking `./mvnw verify` from the repo root (not just `-pl
+  spring-ai-training`): `spring-boot-training`'s `LoggingBeanPostProcessorTest` failed
+  deterministically. Root cause was leftover fallout from the earlier base-package rename
+  (`gr.codelearn.springbootai.training` → `gr.codelearn.springbootai.boot`, commit `9c8e9b7`) that
+  the rename commit missed in five spots: `LoggingBeanPostProcessor`'s package filter (the actual
+  test failure), the `logging.level` keys in `application-local.yml` and `application-test.yml`
+  (silently meant those overrides never applied), springdoc's `packages-to-scan` in
+  `application.yml` (would scan the wrong package for controllers), and a stale Javadoc example in
+  `ProductPriceView`. All five fixed to `gr.codelearn.springbootai.boot`. Confirmed unrelated to
+  the new module: reproduced with `spring-ai-training` fully `git stash`-ed out. A separate,
+  one-off Testcontainers Oracle startup timeout (Docker resource contention from a concurrently
+  running `compose.yaml` Oracle) was transient and cleared on retry — not a code issue.
+- Full-reactor `./mvnw verify` (repo root, all three modules) now passes: `BUILD SUCCESS`.

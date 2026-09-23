@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 
 /**
  * A <b>DTO (record) projection</b> populated by a JPQL <i>constructor expression</i> —
- * {@code select new gr.codelearn.springbootai.training.catalog.ProductPriceView(p.sku, p.name, c.name, p.price) ...} in
+ * {@code select new gr.codelearn.springbootai.boot.catalog.ProductPriceView(p.sku, p.name, c.name, p.price) ...} in
  * {@link ProductRepository#priceView()}. The constructor's parameter list must line up with the {@code select} clause by type and order;
  * the fully-qualified class name is required in the query because JPQL has no imports.
  *

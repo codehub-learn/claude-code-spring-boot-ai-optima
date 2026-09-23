@@ -24,7 +24,7 @@ class LoggingBeanPostProcessor implements BeanPostProcessor {
 
 	@Override
 	public Object postProcessAfterInitialization(final Object bean, final String beanName) throws BeansException {
-		if (bean.getClass().getPackageName().startsWith("gr.codelearn.springbootai.training")) {
+		if (bean.getClass().getPackageName().startsWith("gr.codelearn.springbootai.boot")) {
 			observed.add(beanName);
 			log.debug("Bean ready: '{}' ({})", beanName, bean.getClass().getSimpleName());
 		}

@@ -10,7 +10,7 @@ logging:
       # Empty => disable the ECS JSON layout from application.yml and fall back to the readable console pattern.
       console:
   level:
-    gr.codelearn.springbootai.training: DEBUG
+    gr.codelearn.springbootai.boot: DEBUG
     # Persistence visibility for local runs (U3). SQL statements, bound parameter values, and Flyway's
     # migration log. All off in application.yml / test so prod and CI stay quiet.
     org.hibernate.SQL: DEBUG
