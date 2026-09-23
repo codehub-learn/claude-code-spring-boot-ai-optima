@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: spring-ai-training
+  threads:
+    virtual:
+      # Java 21+ virtual threads for request handling and @Async; keeps blocking code cheap under load.
+      enabled: true
+
+# Shared defaults live here. Profile-specific overrides: application-local.yml (dev), application-test.yml
+# (tests). Secrets and machine-specific values come from the environment or a git-ignored .env, never from
+# a committed file.
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Bootstrap only needs health + info. Later units add metrics, prometheus, etc. on a management port.
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+  info:
+    env:
+      # Lets the `info:` tree below surface through the /actuator/info endpoint.
+      enabled: true
+    git:
+      # 'full' shows branch, commit id/message/time, tags, dirty flag (from target/classes/git.properties,
+      # written by the git-commit-id goal). 'simple' (default) shows only branch + short id + time.
+      mode: full
+    build:
+      # 'build' info group, from META-INF/build-info.properties written by the spring-boot:build-info goal.
+      enabled: true
+
+# Static values exposed by /actuator/info via the env contributor. The 'build' and 'git' groups are
+# contributed automatically from the files produced by the Maven build.
+info:
+  app:
+    name: ${spring.application.name}
+    description: Spring AI core training module
+
+logging:
+  structured:
+    format:
+      # Native Boot structured logging: emit console logs as Elastic Common Schema JSON, correlated with
+      # traceId/spanId once tracing is wired. application-local.yml turns this off so local runs stay
+      # human-readable.
+      console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+        version: "@project.version@"
+        environment: ${spring.profiles.active:default}
