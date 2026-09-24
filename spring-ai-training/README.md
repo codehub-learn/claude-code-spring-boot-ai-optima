@@ -400,3 +400,76 @@ local model is 7.2:
 
 **Tests.** `ChatModelSelectionTest` starts the real application (no web server, `test` profile) once per row of the table above
 and checks the `ChatModel` beans or the startup failure. No API key or Ollama server is needed.
+
+### 7.2 Model selection and quantization
+
+A local model has to fit the machine it runs on. Two numbers decide that: how many **parameters** the model has, and how many
+**bits** each one is stored in.
+
+**Size in memory.** Weights take roughly `parameters × bits per weight / 8` bytes, and the whole model must sit in RAM (CPU) or
+VRAM (GPU) while it answers. On top of that comes the **KV cache**, which grows with the context window (`num-ctx`), plus some
+runtime overhead:
+
+```
+memory ≈ weights + KV cache + overhead
+qwen3:4b at Q4_K_M, num-ctx 8192:  ~2.5 GB + ~1.2 GB + ~0.5 GB  ≈ 4 GB
+```
+
+The KV cache is per token: 2 (key + value) × layers × KV heads × head size × 2 bytes. For Qwen3 4B that is
+2 × 36 × 8 × 128 × 2 ≈ 144 KB per token, so 8192 tokens cost ~1.2 GB. Doubling the context doubles it.
+
+**Quantization** stores the weights in fewer bits than the 16 they were trained in. It trades a little answer quality for a lot
+less memory and more speed. The GGUF formats Ollama uses, with rough sizes for a 4B model:
+
+| Format   | Bits/weight (approx.) | 4B model (approx.) | Quality vs FP16                                        |
+|----------|-----------------------|--------------------|--------------------------------------------------------|
+| `fp16`   | 16                    | ~8 GB              | reference                                              |
+| `q8_0`   | 8.5                   | ~4.3 GB            | practically identical                                  |
+| `q6_K`   | 6.6                   | ~3.3 GB            | very close                                             |
+| `q5_K_M` | 5.7                   | ~2.9 GB            | close                                                  |
+| `q4_K_M` | 4.8                   | ~2.5 GB            | small loss; the usual sweet spot and Ollama's default  |
+| `q3_K_M` | 3.9                   | ~2.1 GB            | noticeable loss: more mistakes, weaker instructions    |
+| `q2_K`   | 3.4                   | ~1.7 GB            | heavy loss; only when nothing else fits                |
+
+The sizes are estimates; check the model's *Tags* page on ollama.com for the real ones.
+
+**Speed.** Generating each token reads all the weights once, so speed is limited mostly by **memory bandwidth**, not compute:
+tokens/s is at most about `bandwidth / model size`. A laptop with ~50 GB/s of RAM bandwidth tops out near 20 tokens/s on a
+2.5 GB model; a GPU with ~500 GB/s near 200. A smaller or more heavily quantized model is faster for the same reason. If the model
+does not fit in VRAM, Ollama splits it between GPU and CPU, and the CPU part sets the pace.
+
+**Rules of thumb.**
+
+- A bigger model at `q4_K_M` usually beats a smaller one at `q8_0` of the same file size. Go below Q4 only if nothing else fits.
+- Pick an **instruct** (chat-tuned) model, not a base model: base models continue text instead of following instructions.
+- **Thinking** models reason at length before answering: better on hard problems, much slower. Turn it off for plain chat.
+- Check what the demo needs: tool calling (U11) and the languages your users write in (the system prompt says "reply in the
+  user's language").
+- Leave room for the context window. A long `num-ctx` on a small machine can cost more than the weights.
+
+**Candidates for this course** (all instruct models at Ollama's default `q4_K_M`):
+
+| Model         | Size    | Tool calling | Languages                         | Notes                                     |
+|---------------|---------|--------------|-----------------------------------|-------------------------------------------|
+| `qwen3:1.7b`  | ~1.4 GB | yes          | 100+, incl. Greek                 | for weak or CPU-only laptops; weaker      |
+| `llama3.2:3b` | ~2.0 GB | yes          | 8 officially, mostly English      | long context (128K)                       |
+| `qwen3:4b`    | ~2.5 GB | yes          | 100+, incl. Greek                 | **picked**; hybrid thinking, turned off   |
+| `gemma3:4b`   | ~3.3 GB | no           | 140+                              | strong multilingual; no tools in Ollama   |
+| `mistral`     | ~4.1 GB | yes          | mostly European languages         | 7B; Spring AI's fallback when none is set |
+
+**The pick: `qwen3:4b`.** It is the strongest of the small ones, runs on an ordinary laptop (about 4 GB with the context above),
+handles Greek, and supports tool calling for U11. Configured in `application.yml`, used only while `spring.ai.model.chat` is
+`ollama`:
+
+```yaml
+spring.ai.ollama.chat:
+	model: qwen3:4b    # always set it: unset, Spring AI falls back to mistral (7B)
+	think: false       # Qwen3 thinks by default; off for faster, plain chat
+	num-ctx: 8192      # context window; its KV cache costs ~1.2 GB
+```
+
+A different quantization is a different tag, e.g. `qwen3:4b-q8_0` for near-FP16 quality at ~4.3 GB. Pulling the model and
+running Ollama in Docker is 7.3.
+
+**Tests.** `ChatModelSelectionTest` also checks that the Ollama `ChatModel` gets `qwen3:4b`, thinking off and the 8192-token
+context from configuration. It reads the bean's options only, so no Ollama server is needed.

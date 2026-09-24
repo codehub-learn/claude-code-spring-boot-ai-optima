@@ -61,7 +61,7 @@ own module — no code here should be required for the Spring Boot units to buil
 - [x] **7.1 Cloud vs offline models** — comparison notes (latency, cost, data residency) contrasting
   Anthropic Claude (cloud) vs Ollama (offline), a `ChatModel` bean selection driven by config (`spring.ai.model.chat` / a custom property)
   rather than hardcoded provider.
-- [ ] **7.2 Model selection & quantization** — a written note on model size/quantization
+- [x] **7.2 Model selection & quantization** — a written note on model size/quantization
   trade-offs for local inference, picking a small instruct model for the offline demo.
 - [ ] **7.3 Docker deployment** — an Ollama service wired into `compose.yaml`, health-checked like
   the existing Oracle service, plus the Spring AI Ollama starter dependency.
@@ -288,3 +288,20 @@ own module — no code here should be required for the Spring Boot units to buil
   wiped the first write of the 7.1 section; both restored through the `idea` MCP `apply_patch`. See lessons.md.
 - Verified: `./mvnw -pl spring-ai-training verify` → 36 unit/slice + 8 IT, 0 failures; full-reactor `./mvnw verify` →
   `BUILD SUCCESS`. Not run: a live call against either provider.
+
+### 7.2 Model selection & quantization (done)
+
+- User decision: **`qwen3:4b`** (Ollama default `q4_K_M`, ~2.5 GB) over `llama3.2:3b`, `gemma3:4b` and `qwen3:1.7b`: strongest of
+  the small ones, Greek support, tool calling for U11.
+- `application.yml`: `spring.ai.ollama.chat.model: qwen3:4b`, `think: false` (Qwen3 is hybrid and thinks by default), `num-ctx: 8192`
+  (KV cache ~1.2 GB, computed from the model's 36 layers × 8 KV heads × 128 head size). Used only while `spring.ai.model.chat` is
+  `ollama`. No pull strategy or compose service: that is 7.3.
+- Finding (2.0.1 bytecode): with `spring.ai.ollama.chat.model` unset, `OllamaChatOptions` falls back to `OllamaModel.MISTRAL`
+  (`mistral`, 7B, ~4 GB), silently. The flat `spring.ai.ollama.chat.*` keys replace the deprecated `spring.ai.ollama.chat.options.*`.
+  `spring.ai.ollama.init.pull-model-strategy` defaults to `never`.
+- `ChatModelSelectionTest` +1: under `ollama`, the `OllamaChatModel` options carry `qwen3:4b`, `ThinkBoolean.DISABLED`, 8192.
+- README: 7.2 section (memory = weights + KV cache + overhead with the worked example, quantization ladder table, bandwidth-bound
+  speed, rules of thumb, candidate table, the pick and its config, choosing a quant by tag). Sizes are marked approximate: Ollama is
+  not installed on this machine, so no tag or size was checked live. README not run through the IDE reformat (see lessons.md).
+- Verified: `./mvnw -pl spring-ai-training verify` → 37 unit/slice + 8 IT, 0 failures; full-reactor `./mvnw verify` →
+  `BUILD SUCCESS`. Not run: a live call against Ollama.

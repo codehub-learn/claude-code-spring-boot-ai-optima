@@ -6,6 +6,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.ollama.OllamaChatModel;
+import org.springframework.ai.ollama.api.OllamaChatOptions;
+import org.springframework.ai.ollama.api.ThinkOption;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -25,7 +27,7 @@ class ChatModelSelectionTest {
 		try (ConfigurableApplicationContext context = start()) {
 			assertThat(context.getBeansOfType(ChatModel.class)).hasSize(1)
 															   .allSatisfy((name, model) -> assertThat(model).isInstanceOf(
-					                                                   AnthropicChatModel.class));
+																	   AnthropicChatModel.class));
 			assertThat(context.getBean(ChatClient.class)).isNotNull();
 		}
 	}
@@ -35,7 +37,7 @@ class ChatModelSelectionTest {
 		try (ConfigurableApplicationContext context = start("--spring.ai.model.chat=ollama")) {
 			assertThat(context.getBeansOfType(ChatModel.class)).hasSize(1)
 															   .allSatisfy((name, model) -> assertThat(model).isInstanceOf(
-					                                                   OllamaChatModel.class));
+																	   OllamaChatModel.class));
 			assertThat(context.getBean(ChatClient.class)).isNotNull();
 		}
 	}
@@ -44,6 +46,17 @@ class ChatModelSelectionTest {
 	void theOllamaEmbeddingModelStaysOffUntilRag() {
 		try (ConfigurableApplicationContext context = start("--spring.ai.model.chat=ollama")) {
 			assertThat(context.getBeansOfType(EmbeddingModel.class)).isEmpty();
+		}
+	}
+
+	@Test
+	void theLocalModelIsTheSmallInstructModelPickedIn72NotSpringAisFallback() {
+		// Unit 7.2: application.yml names the local model. Unset, OllamaChatOptions would fall back to mistral (7B).
+		try (ConfigurableApplicationContext context = start("--spring.ai.model.chat=ollama")) {
+			OllamaChatOptions options = context.getBean(OllamaChatModel.class).getOptions();
+			assertThat(options.getModel()).isEqualTo("qwen3:4b");
+			assertThat(options.getThinkOption()).isEqualTo(ThinkOption.ThinkBoolean.DISABLED);
+			assertThat(options.getNumCtx()).isEqualTo(8192);
 		}
 	}
 
