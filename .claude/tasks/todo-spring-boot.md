@@ -18,9 +18,10 @@ separate and out of scope here — no AI code in this wave.
   segment lives in the package, not the groupId). CLAUDE.md + `maven-scaffold` skill (v1.1.0)
   corrected; the earlier `com.giannacoulis.<app>` value was a mistake.
 
-## Pre-step
+## 0 — Pre-step
 
-- [x] Scaffold the `spring-boot-training` application module via the `maven-scaffold` skill (runnable module: `spring-boot-maven-plugin`,
+- [x] **0 Module scaffold** — Scaffold the `spring-boot-training` application module via the `maven-scaffold` skill (runnable module:
+  `spring-boot-maven-plugin`,
   register in parent `<modules>`), tab-aware
   Spotless Java config, `spring-boot-starter-webmvc` + `-actuator` baseline, compile + `spotless:check`.
   Done: `TrainingApplication` + minimal `application.yml` + context-loads test; `./mvnw verify`
