@@ -41,12 +41,12 @@ own module — no code here should be required for the Spring Boot units to buil
   `spring-ai-mcp-server-showcase` are scaffolded later, at U11/U12 respectively — no need to stand
   them up before their units start.
 
-## U6 — Spring AI Core Concepts (10h)
+## U6 — Spring AI Core Concepts
 
 - [x] **6.1 Spring AI architecture** — starter/BOM overview, model-provider abstraction, a short
   doc/README section on the `ChatModel` → `ChatClient` → `Advisor` layering, where prompts (`src/main/resources/prompts/*.st`) and config
   (`application.yml` `spring.ai.*`) live.
-- [ ] **6.2 ChatClient** — a central `ChatClient` bean built from `ChatClient.Builder` in
+- [x] **6.2 ChatClient** — a central `ChatClient` bean built from `ChatClient.Builder` in
   `config/ai` (per CLAUDE.md — no `new`-ing model clients in features), a first `*Tools`-free
   chat endpoint exercising it end to end.
 - [ ] **6.3 Models / messages** — `SystemMessage` / `UserMessage` / `AssistantMessage` /
@@ -180,3 +180,35 @@ own module — no code here should be required for the Spring Boot units to buil
   abstraction (`ChatModel` / `StreamingChatModel` / `EmbeddingModel`, `spring.ai.model.chat`), the ChatClient → Advisor →
   ChatModel layering diagram, and where prompts / config / keys / tools live.
 - Verified: `./mvnw -pl spring-ai-training verify` → 5 tests, 0 failures; full-reactor `./mvnw verify` → `BUILD SUCCESS`.
+
+### 6.2 ChatClient (done)
+
+- Provider: **Anthropic Claude** (`spring-ai-starter-model-anthropic`, official Anthropic Java SDK), replacing 6.1's two
+  provider-neutral deps (the starter pulls them transitively). The user tuned `spring.ai.anthropic.*`: `api-key: ${ANTHROPIC_API_KEY}`,
+  `base-url`, `timeout: 60s`, `max-retries: 2`, `chat.model: claude-sonnet-5`, `chat.max-tokens: 4096`,
+  `chat.cache-options.strategy: SYSTEM_AND_TOOLS`, `chat.inference-geo: global` (a plain string, so a bad value only fails at call
+  time; not live-verified). Temperature / top-p / top-k are left commented out. Checked: the app starts with or without the variable,
+  so a missing key only surfaces on the first call (502). `application-test.yml` sets a dummy key, and `AiTrainingApplicationTests`
+  now runs under `@ActiveProfiles("test")`.
+- Course correction: a first cut used Ollama (plus a compose service). The user rejected it because it breaks the step order: the
+  local runtime belongs to U7. It was fully reverted, including `compose.yaml`. See lessons.md.
+- `config/ai/ChatClientConfig`: the single `ChatClient` bean, built from the auto-configured builder with `SimpleLoggerAdvisor` as a
+  default advisor; its DEBUG logger is enabled only in `application-local.yml`.
+- `chat` feature: `ChatController` (`POST /api/{version}/chat-completions`, `version = "v1"`), `ChatService` (`call().chatResponse()`
+  → content + model + token usage; model-call `RuntimeException` → `chat.internal.ChatModelUnavailableException`), records
+  `ChatCompletionRequest` (`@NotBlank @Size(max = 4000)`) and `ChatCompletionResponse` (+ nested `TokenUsage`, the user's option 2).
+  No persistence, so no entity/repository/mapper/migration in this slice.
+- **API versioning (user decision):** Spring Framework 7 built-in, path-segment strategy (`spring.mvc.apiversion.use.path-segment: 1`,
+  `supported: 1`), keeping CLAUDE.md's `/api/v1` URLs. Findings: the path-segment resolver did **not** break `/v3/api-docs` or actuator (the
+  planned `WebMvcConfigurer` fallback was not needed); springdoc 3.1.1 is version-aware and writes the mapping's literal version into
+  the documented path, so `version = "1"` published `/api/1/chat-completions`. Switched the mapping to `"v1"` (the semantic parser strips
+  the `v`), which documents `/api/v1/chat-completions`.
+- `config/web`: `ApiExceptionHandler` (400 + `errors` extension on body validation, 502 on `ChatModelUnavailableException`, Spring's own
+  400 for unsupported versions) and `OpenApiConfig`, both trimmed from the Boot module. Added `spring-boot-starter-validation` and
+  springdoc to the pom.
+- Tests: `ChatControllerTest` (4, `@WebMvcTest`) and `ChatApiIT` (3, real context + `@Primary` stub `ChatModel`: happy path, 502,
+  api-docs path). No API key or network needed for `verify`.
+- README: 6.2 section (provider + run, central client, endpoint + curl + status table, API versioning, tests); 6.1 text updated for the
+  starter swap.
+- Verified: `./mvnw -pl spring-ai-training verify` → 9 unit/slice + 3 IT, 0 failures; full-reactor `./mvnw verify` → `BUILD SUCCESS`.
+  Not run here: a live call against the Anthropic API (spends the user's credits).

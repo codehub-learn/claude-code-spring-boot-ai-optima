@@ -476,6 +476,13 @@ Patterns captured after user corrections. Review at session start.
   same as the `MethodArgumentNotValidException` handler already does. This was a **pre-existing, silent bug**: `replaceProduct` had the
   same method shape since U4.2 but nothing ever exercised its body-validation failure path until a new endpoint's test did.
 
+## Respect the step order and the agreed decisions
+
+- Never offer an option that pulls a later unit's topic into the current step, or contradicts an "Agreed decisions" entry. In 6.2 I
+  offered "Ollama now" (the local runtime is U7; the agreed 6.x provider is Anthropic). The user picked it and then rejected it for
+  breaking the step order, so the whole Ollama cut had to be reverted. When a step needs something from a later unit, use the agreed
+  choice. Only raise a deviation when the agreed choice truly blocks the step, and flag it as a deviation. User correction, 2026-09-24.
+
 ## Commit tags follow the step number
 
 - Every commit gets a tag named after the todo step it implements (`0`, `1.1` ... `4.5` for Boot; `5`, `6.1` ... `12.1` for AI).

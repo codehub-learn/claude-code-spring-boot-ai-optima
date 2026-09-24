@@ -11,6 +11,8 @@ logging:
       console:
   level:
     gr.codelearn.springbootai.ai: DEBUG
+    # SimpleLoggerAdvisor logs full prompts and completions at DEBUG. Local only: they may contain user data (CLAUDE.md).
+    org.springframework.ai.chat.client.advisor: DEBUG
 
 management:
   endpoints:
