@@ -197,26 +197,12 @@ ToolResponseMessage(responses = [ToolResponse(id = "call-1", name = "currentTime
 **Building a prompt.** The fluent API and a hand-built `Prompt` produce the same thing:
 
 ```java
-chatClient.prompt().
-
-system("Answer in one word.").
-
-user("Capital of Greece?").
-
-call().
-
-content();
+chatClient.prompt().system("Answer in one word.").user("Capital of Greece?").call().content();
 
 Prompt prompt = new Prompt(List.of(new SystemMessage("Answer in one word."), new UserMessage("Capital of Greece?"),
-		new AssistantMessage("Athens."), new UserMessage("And of Italy?")),
-		ChatOptions.builder().temperature(0.0).maxTokens(50).build());   // per-call options, optional
-chatClient.
-
-prompt(prompt).
-
-call().
-
-content();   // still goes through the default advisors
+								   new AssistantMessage("Athens."), new UserMessage("And of Italy?")),
+						   ChatOptions.builder().temperature(0.0).maxTokens(50).build());   // per-call options, optional
+chatClient.prompt(prompt).call().content();   // still goes through the default advisors
 ```
 
 `new Prompt("Hi")` is a single `UserMessage`. Options set on a `Prompt` override `spring.ai.anthropic.chat.*` for that call only.
@@ -360,3 +346,57 @@ as untrusted input, and keep server-side conversation state (U9 memory) when tha
 `ChatModel`) covers the rendered default, the pitfalls in the table, and instruction-like user text. `ChatApiIT` checks that a
 real request starts with the rendered system prompt (today's date, no `{today}`) and that `/prompts` puts it before the client's
 turns. `PromptControllerTest` checks the `system` role is rejected.
+
+---
+
+## U7 — Offline & Hybrid LLM Deployment
+
+### 7.1 Cloud vs offline models
+
+**Two runtimes, one interface.** Both are a `ChatModel` to Spring AI, so everything above the model (the central `ChatClient`, the
+system prompt, advisors, endpoints) is the same for both:
+
+|                 | Cloud: Anthropic Claude (`AnthropicChatModel`)                                                  | Offline: Ollama (`OllamaChatModel`)                                                          |
+|-----------------|-------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| Where it runs   | Anthropic's servers, over HTTPS                                                                 | an Ollama server you run (laptop, on-prem box, container; 7.3)                               |
+| Model quality   | frontier models: strongest reasoning, long context, reliable tool use                           | open-weight models small enough for local hardware; noticeably weaker on hard tasks          |
+| Latency         | network round trip + provider queueing; fast generation on large GPU fleets                     | no network; speed depends entirely on your CPU/GPU and model size; first call loads the model |
+| Cost            | pay per input/output token (see Anthropic's pricing page); nothing to run                       | no per-token fee; you pay for the hardware, power and upkeep                                 |
+| Data residency  | prompts and replies leave your network; `inference-geo` (`us` / `eu` / `global`) picks a region | nothing leaves the machine: fits air-gapped or strict data-protection setups                 |
+| Availability    | needs internet and an API key; subject to rate limits and provider outages                      | works offline; as available as the box it runs on                                            |
+| Scaling         | the provider's problem                                                                          | yours: concurrent users compete for the same GPU                                             |
+| Operations      | one env var (`ANTHROPIC_API_KEY`)                                                               | install and pull models, keep them updated, size the machine (7.2, 7.3)                      |
+
+Rules of thumb: use the cloud when answer quality matters most and the data may leave the building; use a local model when it
+may not, when you must work offline, or for high-volume simple tasks where per-token cost adds up. Hybrid setups do both, e.g. a
+local model in development and the cloud in production, which is what 7.4 wires up.
+
+**Selecting the provider by configuration.** Both starters are on the classpath (`spring-ai-starter-model-anthropic` and, since
+7.1, `spring-ai-starter-model-ollama`). Each starter's chat auto-configuration is conditional on one property:
+
+```yaml
+spring.ai.model:
+	chat: anthropic       # or: ollama
+	embedding: none       # the Ollama starter also brings an EmbeddingModel; off until RAG (U10)
+```
+
+| `spring.ai.model.chat`         | `ChatModel` beans                | Result                                                                         |
+|--------------------------------|----------------------------------|--------------------------------------------------------------------------------|
+| `anthropic` (the default here) | `AnthropicChatModel`             | cloud                                                                          |
+| `ollama`                       | `OllamaChatModel`                | local server at `spring.ai.ollama.base-url` (default `http://localhost:11434`) |
+| not set at all                 | both (each has `matchIfMissing`) | startup fails: `ChatClient.Builder` finds 2 `ChatModel` beans                  |
+| a name with no starter (typo)  | none                             | startup fails: no `ChatModel` for the builder                                  |
+
+The last two rows are why `application.yml` always sets the property explicitly. Feature code never changes: `ChatService` injects
+`ChatClient`, and `ChatClientConfig` builds it from whichever `ChatModel` exists. Neither client connects at startup, so the app
+starts even when Ollama isn't running or no API key is set; the first call then fails with a 502.
+
+Switching today is a command-line override. The profile-based switch is 7.4, running Ollama in Docker is 7.3, and picking the
+local model is 7.2:
+
+```bash
+./mvnw -pl spring-ai-training spring-boot:run -Dspring-boot.run.arguments=--spring.ai.model.chat=ollama
+```
+
+**Tests.** `ChatModelSelectionTest` starts the real application (no web server, `test` profile) once per row of the table above
+and checks the `ChatModel` beans or the startup failure. No API key or Ollama server is needed.

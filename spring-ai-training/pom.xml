@@ -58,6 +58,13 @@
 			<artifactId>spring-ai-starter-model-anthropic</artifactId>
 		</dependency>
 
+		<!-- Spring AI on a local Ollama server (unit 7.1): OllamaChatModel + OllamaEmbeddingModel and their autoconfig. Both providers are
+		     on the classpath; spring.ai.model.chat in application.yml decides which ChatModel bean exists, so feature code never changes. -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-ollama</artifactId>
+		</dependency>
+
 		<!-- DevTools: automatic restart + LiveReload while developing. optional=true so it never leaks onto a
 		     downstream classpath; Boot also disables it automatically in a fully packaged jar. -->
 		<dependency>

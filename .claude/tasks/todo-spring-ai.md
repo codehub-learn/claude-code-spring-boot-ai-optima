@@ -58,7 +58,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U7 — Offline & Hybrid LLM Deployment
 
-- [ ] **7.1 Cloud vs offline models** — comparison notes (latency, cost, data residency) contrasting
+- [x] **7.1 Cloud vs offline models** — comparison notes (latency, cost, data residency) contrasting
   Anthropic Claude (cloud) vs Ollama (offline), a `ChatModel` bean selection driven by config (`spring.ai.model.chat` / a custom property)
   rather than hardcoded provider.
 - [ ] **7.2 Model selection & quantization** — a written note on model size/quantization
@@ -266,3 +266,25 @@ own module — no code here should be required for the Spring Boot units to buil
   forged-`assistant`-turn drift attempt); 6.3 text updated for the removed `system` role.
 - Verified: `./mvnw -pl spring-ai-training verify` → 31 unit/slice + 8 IT, 0 failures; full-reactor `./mvnw verify` →
   `BUILD SUCCESS`. Not run: the live curl demo against the Anthropic API (spends the user's credits).
+
+### 7.1 Cloud vs offline models (done)
+
+- **Deviation (user-approved):** the `spring-ai-starter-model-ollama` dependency moved from 7.3 to 7.1, because selecting the
+  `ChatModel` by `spring.ai.model.chat` needs both providers' autoconfig on the classpath. Nothing else from 7.2-7.4 was pulled in:
+  no compose service, no local model choice, no profile switch.
+- `application.yml`: `spring.ai.model.chat: anthropic` (explicit) and `spring.ai.model.embedding: none` (the Ollama starter also
+  brings an `EmbeddingModel`; embeddings are U10).
+- Findings (checked in the 2.0.1 autoconfig bytecode, then pinned by tests): `AnthropicChatAutoConfiguration` and
+  `OllamaChatAutoConfiguration` are both `@ConditionalOnProperty(spring.ai.model.chat, havingValue=<name>, matchIfMissing=true)`.
+  Unset with both starters → two `ChatModel` beans → startup fails in `ChatClientConfig` ("expected single matching bean but found
+  2"); an unknown value → no `ChatModel` → startup fails too. Neither client connects at startup, so the app starts without an
+  API key or a running Ollama. The Ollama starter pulls `spring-boot-starter-webclient`; the app stays a servlet app.
+- `ChatModelSelectionTest` (5): starts the real app (`SpringApplicationBuilder`, `WebApplicationType.NONE`, `test` profile) for
+  default → `AnthropicChatModel`, `ollama` → `OllamaChatModel`, no Ollama `EmbeddingModel`, unset (via `spring.config.name=none`,
+  so the property is truly absent) → fails with 2 beans, unknown value → fails with none.
+- README: new U7 heading and 7.1 section (cloud vs offline comparison table: where it runs, quality, latency, cost, data
+  residency, availability, scaling, operations; rules of thumb; the selection table; the command-line switch).
+- Fixed along the way: the IDE's Markdown reformat had mangled the 6.3 README Java block (committed in 6.3) and a stale IDE buffer
+  wiped the first write of the 7.1 section; both restored through the `idea` MCP `apply_patch`. See lessons.md.
+- Verified: `./mvnw -pl spring-ai-training verify` → 36 unit/slice + 8 IT, 0 failures; full-reactor `./mvnw verify` →
+  `BUILD SUCCESS`. Not run: a live call against either provider.

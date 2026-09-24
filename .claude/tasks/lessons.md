@@ -488,3 +488,18 @@ Patterns captured after user corrections. Review at session start.
 - Every commit gets a tag named after the todo step it implements (`0`, `1.1` ... `4.5` for Boot; `5`, `6.1` ... `12.1` for AI).
   When asking about the tag, **propose** that number instead of asking for one from scratch. The pre-step tags are the bare unit
   number (`0`, `5`). User instruction, 2026-09-24.
+## `idea` MCP reformat: stale buffers and Markdown code fences
+
+- `reformat_file` works on the IDE's in-memory document. If the file is open in IntelliJ and was changed on disk by a shell/Write
+  edit the IDE hasn't reloaded yet, the reformat saves the **stale buffer over the disk edit**. Hit twice: a `PromptRequest` Javadoc
+  fix (6.3) and a whole new README section (7.1) silently vanished. Edit files the IDE may have open through the `idea` MCP
+  `apply_patch` (it edits the IDE document), or confirm the edit is on disk after every reformat (`git diff --stat`, `grep`).
+- Do **not** run `reformat_file` on Markdown that contains ```` ```java ```` fences: IntelliJ formats the embedded Java as a
+  standalone file and breaks fluent chains into one call per paragraph (`chatClient.prompt().` / blank / `system(...)`) and
+  inserts blank lines after the fence. This mangled the 6.3 README block, unnoticed until 7.1. Leave README formatting alone.
+
+## Show the commit message in plain text
+
+- Never put the proposed commit message inside an `AskUserQuestion` option preview: the box truncates long lines and the user
+  can't read the whole message. Write it as a fenced block in the reply and ask the verify / approve / tag questions in plain text.
+  User correction, 2026-09-24.

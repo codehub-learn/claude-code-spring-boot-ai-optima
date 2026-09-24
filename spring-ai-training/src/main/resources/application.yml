@@ -6,6 +6,13 @@ spring:
       # Java 21+ virtual threads for request handling and @Async; keeps blocking code cheap under load.
       enabled: true
   ai:
+    model:
+      # Unit 7.1: which provider's ChatModel bean is created. Both starters (Anthropic, Ollama) are on the classpath and each one's chat
+      # autoconfig is active only when this names it; left unset, BOTH activate (matchIfMissing) and the ChatClient.Builder fails on
+      # two ChatModel beans. anthropic = cloud (default), ollama = local/offline.
+      chat: anthropic
+      # The Ollama starter also brings an EmbeddingModel. Embeddings arrive with RAG in U10; until then, none.
+      embedding: none
     # See for details: https://docs.spring.io/spring-ai/reference/api/chat/anthropic-chat.html
     anthropic:
       # The key comes from the environment only, so it never appears in a committed file. The app still starts without
@@ -16,7 +23,7 @@ spring:
       timeout: 60s
       max-retries: 2
       chat:
-        # Claude Sonnet: the cloud model agreed for this curriculum. Cloud vs local selection is unit 7.1.
+        # Claude Sonnet: the cloud model agreed for this curriculum. Only used while spring.ai.model.chat is anthropic.
         model: claude-sonnet-5
         # Upper bound on generated tokens per reply; Anthropic requires one on every request.
         max-tokens: 4096
