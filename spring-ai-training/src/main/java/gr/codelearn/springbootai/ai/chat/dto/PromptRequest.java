@@ -13,8 +13,9 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
- * Unit 6.3: an explicit, ordered list of role-tagged messages, which {@code ChatService} turns one-to-one into Spring AI {@code Message}s
- * and wraps in a {@code Prompt}. The client owns the whole conversation: nothing is remembered between calls (memory is U9).
+ * Unit 6.3: an explicit, ordered list of role-tagged messages ({@code user} / {@code assistant} since 6.4), which {@code ChatService} turns
+ * one-to-one into Spring AI {@code Message}s and wraps in a {@code Prompt}. The client owns the whole conversation: nothing is remembered
+ * between calls (memory is U9).
  *
  * @param messages the conversation so far, oldest first; the last one must come from the user, since that is the turn the model answers
  */
@@ -52,11 +53,11 @@ public record PromptRequest(
 	}
 
 	/**
-	 * The roles a client may send. {@code tool} is deliberately absent: tool results are produced by the application, not the client
-	 * (U11).
+	 * The roles a client may send. {@code system} is absent since 6.4: system instructions come only from the application's template (a
+	 * client one would sit next to them and compete). {@code tool} is absent too: tool results are produced by the application (U11).
+	 * Either one is rejected as an unreadable body (400).
 	 */
 	public enum Role {
-		@JsonProperty("system") SYSTEM,
 		@JsonProperty("user") USER,
 		@JsonProperty("assistant") ASSISTANT
 	}

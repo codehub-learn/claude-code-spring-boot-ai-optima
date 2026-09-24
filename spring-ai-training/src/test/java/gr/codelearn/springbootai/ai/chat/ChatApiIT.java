@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -22,6 +24,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import reactor.core.publisher.Flux;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -29,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
 /**
- * Units 6.2 / 6.3 integration test: the full context (Anthropic starter, {@code config.ai.ChatClientConfig}, the advisor chain,
+ * Units 6.2 - 6.4 integration test: the full context (Anthropic starter, {@code config.ai.ChatClientConfig}, the advisor chain,
  * {@code config.web.ApiExceptionHandler}, API versioning, springdoc) over HTTP via {@link MockMvcTester}. Only the provider is replaced: a
  * {@code @Primary} stub {@link ChatModel} stands in for {@code AnthropicChatModel}, so no API key or network is needed. Covers the blocking
  * and the streamed chat completion and the message-list endpoint, each with a model failure.
@@ -110,7 +113,6 @@ class ChatApiIT {
 	void promptMessagesReachTheModelAsTypedMessagesInOrder() {
 		assertThat(mvc.post().uri("/api/v1/prompts").contentType(MediaType.APPLICATION_JSON).content("""
 																									 {"messages": [
-																									   {"role": "system",    "content": "Answer in one word."},
 																									   {"role": "user",      "content": "Capital of Greece?"},
 																									   {"role": "assistant", "content": "Athens."},
 																									   {"role": "user",      "content": "And of Italy?"}]}"""))
@@ -119,10 +121,29 @@ class ChatApiIT {
 				.extractingPath("$.content")
 				.isEqualTo("echo: And of Italy?");
 
-		assertThat(stubChatModel.lastPrompt().getInstructions())
+		final List<Message> instructions = stubChatModel.lastPrompt().getInstructions();
+		// 6.4: the application's system prompt comes first, then the client's turns, in order.
+		assertThat(instructions.getFirst().getMessageType()).isEqualTo(MessageType.SYSTEM);
+		assertThat(instructions.subList(1, instructions.size()))
 				.extracting(Message::getMessageType, Message::getText)
-				.containsExactly(tuple(MessageType.SYSTEM, "Answer in one word."), tuple(MessageType.USER, "Capital of Greece?"),
-								 tuple(MessageType.ASSISTANT, "Athens."), tuple(MessageType.USER, "And of Italy?"));
+				.containsExactly(tuple(MessageType.USER, "Capital of Greece?"), tuple(MessageType.ASSISTANT, "Athens."),
+								 tuple(MessageType.USER, "And of Italy?"));
+	}
+
+	@Test
+	void everyCallStartsWithTheApplicationSystemPromptRenderedFromTheTemplate() {
+		assertThat(mvc.post().uri("/api/v1/chat-completions").contentType(MediaType.APPLICATION_JSON).content("""
+																											  {"message": "Say hi"}"""))
+				.hasStatusOk();
+
+		assertThat(stubChatModel.lastPrompt().getInstructions()).satisfiesExactly(
+				system -> assertThat(system).isInstanceOf(SystemMessage.class)
+											.extracting(Message::getText)
+											.asString()
+											.startsWith("You are the Code.Learn training assistant.")
+											.endsWith("Today is " + LocalDate.now() + ".")
+											.doesNotContain("{today}"),
+				user -> assertThat(user).isInstanceOf(UserMessage.class).extracting(Message::getText).isEqualTo("Say hi"));
 	}
 
 	@Test

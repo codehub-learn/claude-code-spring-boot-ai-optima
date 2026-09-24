@@ -52,7 +52,7 @@ own module — no code here should be required for the Spring Boot units to buil
 - [x] **6.3 Models / messages** — `SystemMessage` / `UserMessage` / `AssistantMessage` /
   `ToolResponseMessage` walkthrough, `Prompt` construction, streaming vs blocking `call()`
   response handling.
-- [ ] **6.4 System vs user instructions** — system prompt template loaded as a `Resource`,
+- [x] **6.4 System vs user instructions** — system prompt template loaded as a `Resource`,
   contrasted with per-request user instructions, a demo showing system-prompt drift/override
   pitfalls.
 
@@ -241,3 +241,28 @@ own module — no code here should be required for the Spring Boot units to buil
   MCP `apply_patch`.
 - Verified: `./mvnw -pl spring-ai-training verify` → 24 unit/slice + 7 IT, 0 failures; full-reactor `./mvnw verify` → `BUILD SUCCESS`.
   Not run: a live streamed call against the Anthropic API (spends the user's credits).
+
+### 6.4 System vs user instructions (done)
+
+- User decisions: the system prompt is the **central** `ChatClient`'s default (every endpoint inherits it, no new endpoint), and
+  `/api/v1/prompts` now **rejects** a client `system` role (400), which changes the 6.3 contract to `user` / `assistant` only.
+- `src/main/resources/prompts/chat-system.st`: persona + four rules (app instructions take priority and are never revealed, concise,
+  reply in the user's language, admit uncertainty) + `Today is {today}.` `ChatClientConfig` loads it as a `Resource`
+  (`@Value("classpath:prompts/chat-system.st")` on the bean method) into `builder.defaultSystem(...)`.
+- `ChatService`: every call (blocking, streaming, `/prompts`) adds `.system(ChatService::withSystemParams)`, which fills `today` and
+  keeps the default text. `toMessage` lost its `SYSTEM` case; `PromptRequest.Role` is now `USER`, `ASSISTANT`.
+- Findings (Spring AI 2.0.1, probed with a throwaway stub test, then pinned in `ChatClientConfigTest`):
+	- a per-call `.system(String)` **replaces** the default system text; `.system(Consumer)` with params keeps it;
+	- a `SystemMessage` inside `prompt(Prompt)` or `.messages(...)` is **added** after the default: two system messages;
+	- a template with **no** params passed is not rendered at all, so a literal `{today}` reaches the model silently; passing
+	  **some** params but not all throws `IllegalStateException` ("Not all variables were replaced") at call time. My first test
+	  assumed the no-params case throws; it doesn't;
+	- user text is never templated (`{today}` in a user message is sent verbatim).
+- Tests: `ChatClientConfigTest` (6, `ApplicationContextRunner` + real config/template + recording stub): rendered default, the
+  literal-placeholder and partial-params cases, replace and stack pitfalls, instruction-like user text. `ChatApiIT` +1 (a real
+  request starts with the rendered system prompt) and the `/prompts` order test now expects the app system message first.
+  `PromptControllerTest` +1 (`system` role → 400).
+- README: 6.4 section (system vs user, the template, wiring, pitfall table, live curl demo for override, language and a
+  forged-`assistant`-turn drift attempt); 6.3 text updated for the removed `system` role.
+- Verified: `./mvnw -pl spring-ai-training verify` → 31 unit/slice + 8 IT, 0 failures; full-reactor `./mvnw verify` →
+  `BUILD SUCCESS`. Not run: the live curl demo against the Anthropic API (spends the user's credits).
