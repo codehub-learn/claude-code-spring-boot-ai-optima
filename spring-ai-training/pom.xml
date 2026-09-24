@@ -15,7 +15,7 @@
 
 	<!-- Meta-data -->
 	<name>[${project.artifactId}]</name>
-	<description>Spring AI core training module: chat, memory, RAG, and tool calling (U1-U5), plus the MCP client half of U6</description>
+	<description>Spring AI core training module: chat, memory, RAG, and tool calling (U6-U10), plus the MCP client half of U11</description>
 
 	<!-- Dependencies -->
 	<dependencies>
@@ -34,6 +34,19 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!-- Spring AI, provider-free (versions from the spring-ai-bom imported by the reactor parent). These two are
+		     exactly what every spring-ai-starter-model-* pulls transitively; a provider starter lands on top in 6.2 / 7.1. -->
+		<!-- ChatClient fluent API + Advisor API (CallAdvisor, SimpleLoggerAdvisor); pulls spring-ai-model (ChatModel, Prompt, messages) -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-client-chat</artifactId>
+		</dependency>
+		<!-- ChatClientAutoConfiguration: the prototype ChatClient.Builder bean, built on whichever ChatModel is present -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-autoconfigure-model-chat-client</artifactId>
 		</dependency>
 
 		<!-- DevTools: automatic restart + LiveReload while developing. optional=true so it never leaks onto a

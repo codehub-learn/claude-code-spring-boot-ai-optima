@@ -43,7 +43,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U6 — Spring AI Core Concepts (10h)
 
-- [ ] **6.1 Spring AI architecture** — starter/BOM overview, model-provider abstraction, a short
+- [x] **6.1 Spring AI architecture** — starter/BOM overview, model-provider abstraction, a short
   doc/README section on the `ChatModel` → `ChatClient` → `Advisor` layering, where prompts (`src/main/resources/prompts/*.st`) and config
   (`application.yml` `spring.ai.*`) live.
 - [ ] **6.2 ChatClient** — a central `ChatClient` bean built from `ChatClient.Builder` in
@@ -162,3 +162,21 @@ own module — no code here should be required for the Spring Boot units to buil
   one-off Testcontainers Oracle startup timeout (Docker resource contention from a concurrently
   running `compose.yaml` Oracle) was transient and cleared on retry — not a code issue.
 - Full-reactor `./mvnw verify` (repo root, all three modules) now passes: `BUILD SUCCESS`.
+
+### 6.1 Spring AI architecture (done)
+
+- Per user decision: README plus a provider-free test, no provider starter yet (that stays with 6.2 / 7.1).
+- `spring-ai-training/pom.xml`: added `spring-ai-client-chat` + `spring-ai-autoconfigure-model-chat-client` (BOM-managed,
+  2.0.1), exactly the provider-neutral pair every `spring-ai-starter-model-*` pulls transitively. `<description>` renumbered to
+  U6-U10 / U11.
+- `SpringAiArchitectureTest` (`ApplicationContextRunner` + `ChatClientAutoConfiguration` + a stub `ChatModel` lambda): builder
+  auto-configured over the model; a call traces `advisor:before → model → advisor:after` through a recording `CallAdvisor` +
+  `SimpleLoggerAdvisor`; the model receives a `Prompt` of one `SystemMessage` + one `UserMessage`; `spring.ai.chat.client.enabled=false`
+  removes the builder.
+- Finding (checked with `javap` on the 2.0.1 jar): `ChatClientAutoConfiguration.chatClientBuilder` is `@Scope("prototype")` with
+  no `@ConditionalOnBean(ChatModel)`. Without a `ChatModel` the context still starts (so `contextLoads` needed no exclude), but
+  the first `ChatClient.Builder` injection fails with `UnsatisfiedDependencyException`. Asserted in the test, noted in the README.
+- New `spring-ai-training/README.md` (shape of the Boot module's): 6.1 section on the BOM, starter families, the provider
+  abstraction (`ChatModel` / `StreamingChatModel` / `EmbeddingModel`, `spring.ai.model.chat`), the ChatClient → Advisor →
+  ChatModel layering diagram, and where prompts / config / keys / tools live.
+- Verified: `./mvnw -pl spring-ai-training verify` → 5 tests, 0 failures; full-reactor `./mvnw verify` → `BUILD SUCCESS`.
