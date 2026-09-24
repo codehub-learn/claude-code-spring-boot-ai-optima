@@ -440,8 +440,8 @@ Patterns captured after user corrections. Review at session start.
 
 - `@Validated(SomeGroup.class)` validates **only** `SomeGroup` — every constraint with no explicit
   `groups` attribute belongs to `jakarta.validation.groups.Default`, and naming a different group
-  does not add to `Default`, it replaces it. A merged create/update DTO
-  (`catalog.dto.ProductRequest`, `sku` required only via `OnCreate`) silently accepted a blank
+  does not add to `Default`, it replaces it. A merged create/update DTO (`catalog.dto.ProductRequest`, `sku` required only via `OnCreate`)
+  silently accepted a blank
   `name` and a non-positive `price` on create until `OnCreate`/`OnUpdate` were declared
   `extends Default`. Caught by a slice test asserting the field-error list, not by compilation or
   startup.
@@ -470,8 +470,14 @@ Patterns captured after user corrections. Review at session start.
   `@RequestBody` reports the body's violations through `HandlerMethodValidationException`, not `MethodArgumentNotValidException` — even
   though a body-only method (no other constrained parameter) on the same controller reports the same kind of violation through
   `MethodArgumentNotValidException` as expected. An `ApiExceptionHandler` that reads every `ParameterValidationResult` as a flat scalar
-  (`result.getMethodParameter().getParameterName()`) reports the bare parameter name (`"request"`) instead of the real field
-  (`"price"`). Fix: check `result instanceof org.springframework.validation.method.ParameterErrors` — the subtype Spring uses for a
+  (`result.getMethodParameter().getParameterName()`) reports the bare parameter name (`"request"`) instead of the real field (`"price"`).
+  Fix: check `result instanceof org.springframework.validation.method.ParameterErrors` — the subtype Spring uses for a
   cascaded object argument, itself a Spring `Errors` with real `FieldError`s — and read `getFieldErrors()` from it in that case, the
   same as the `MethodArgumentNotValidException` handler already does. This was a **pre-existing, silent bug**: `replaceProduct` had the
   same method shape since U4.2 but nothing ever exercised its body-validation failure path until a new endpoint's test did.
+
+## Commit tags follow the step number
+
+- Every commit gets a tag named after the todo step it implements (`0`, `1.1` ... `4.5` for Boot; `5`, `6.1` ... `12.1` for AI).
+  When asking about the tag, **propose** that number instead of asking for one from scratch. The pre-step tags are the bare unit
+  number (`0`, `5`). User instruction, 2026-09-24.
