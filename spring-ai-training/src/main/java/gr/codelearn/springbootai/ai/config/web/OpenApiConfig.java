@@ -36,6 +36,9 @@ class OpenApiConfig {
 							  .version(version)
 							  .contact(new Contact().name("Code.Learn by Code.Hub").url("https://www.codehub.gr/codelearn/"))
 							  .license(new License().name("Apache-2.0")))
-				.tags(List.of(new Tag().name("chat").description("Single-turn chat completions through the central ChatClient.")));
+				.tags(List.of(new Tag().name("chat")
+									   .description(
+											   "Chat completions through the central ChatClient: blocking or streamed, one message or a " +
+											   "message list.")));
 	}
 }

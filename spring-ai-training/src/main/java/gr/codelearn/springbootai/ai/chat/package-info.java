@@ -1,5 +1,6 @@
 /**
- * The {@code chat} feature: single-turn chat completions through the central {@code ChatClient} (unit 6.2).
+ * The {@code chat} feature: chat completions through the central {@code ChatClient}. One message, blocking (6.2) or streamed (6.3), and an
+ * explicit message list (6.3).
  */
 @NullMarked
 package gr.codelearn.springbootai.ai.chat;

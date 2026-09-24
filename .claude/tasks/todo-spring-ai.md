@@ -49,7 +49,7 @@ own module — no code here should be required for the Spring Boot units to buil
 - [x] **6.2 ChatClient** — a central `ChatClient` bean built from `ChatClient.Builder` in
   `config/ai` (per CLAUDE.md — no `new`-ing model clients in features), a first `*Tools`-free
   chat endpoint exercising it end to end.
-- [ ] **6.3 Models / messages** — `SystemMessage` / `UserMessage` / `AssistantMessage` /
+- [x] **6.3 Models / messages** — `SystemMessage` / `UserMessage` / `AssistantMessage` /
   `ToolResponseMessage` walkthrough, `Prompt` construction, streaming vs blocking `call()`
   response handling.
 - [ ] **6.4 System vs user instructions** — system prompt template loaded as a `Resource`,
@@ -212,3 +212,32 @@ own module — no code here should be required for the Spring Boot units to buil
   starter swap.
 - Verified: `./mvnw -pl spring-ai-training verify` → 9 unit/slice + 3 IT, 0 failures; full-reactor `./mvnw verify` → `BUILD SUCCESS`.
   Not run here: a live call against the Anthropic API (spends the user's credits).
+### 6.3 Models / messages (done)
+
+- User decision: extend the `chat` feature. The blocking `POST /api/v1/chat-completions` stays; the same URL with
+  `Accept: text/event-stream` streams (content negotiation, method-level `produces` overrides the class-level JSON one); a new
+  `POST /api/v1/prompts` (`PromptController`) takes an explicit `system` / `user` / `assistant` message list. `ToolResponseMessage`
+  is covered in a provider-free test and the README only, since real tools are U11.
+- `ChatService`: `completePrompt(PromptRequest)` maps each role to `SystemMessage` / `UserMessage` / `AssistantMessage` (a `switch`)
+  and sends `new Prompt(messages)` through `chatClient.prompt(prompt)`, so the default advisors still apply. `stream(...)` is
+  `stream().content()` → `Flux<ChatCompletionChunkResponse>`, errors mapped to `ChatModelUnavailableException`. Named
+  `completePrompt`, not an overload of `complete`: Mockito's `any()` made the overload ambiguous in tests.
+- `PromptRequest` record: `@NotEmpty @Size(max = 20)` list of `@Valid` messages, lower-case roles via `@JsonProperty` on the enum
+  constants (`tool` rejected as unreadable, 400), and an `@AssertTrue @JsonIgnore isLastMessageFromUser()` cross-field rule.
+- Streaming design: each SSE `data` is JSON (`{"content": ...}`), because SSE clients strip one leading space and split on
+  newlines, so raw tokens would lose whitespace. A model failure mid-stream can't become a 502 (status already committed), so the
+  controller ends the stream with an `event:error` whose data is the same `ProblemDetail`. Validation still gives a normal 400.
+- Findings: with no `Accept` header the JSON handler still wins (6.2 tests unchanged); springdoc documents both handlers on the
+  one path. A failed stream makes Spring AI's `MessageAggregator` log `Aggregation Error` at ERROR 5 times (one per aggregating
+  layer); verified with a throwaway counting stub that the model is called and subscribed exactly once, so it's noise, not retries.
+- Tests: `MessagesAndPromptsTest` (7, no context: message types and roles, a hand-built tool round trip, `Prompt` construction with
+  `ChatOptions`, fluent vs manual prompt, `call` vs `stream`); `PromptControllerTest` (5); `ChatControllerTest` +3 (SSE body,
+  in-band error event, 400 before streaming); `ChatApiIT` +4 with the stub now also streaming and recording the last `Prompt`
+  (typed messages reach the model in order, SSE body, in-band error, 502 on `/prompts`).
+- README: 6.3 section (message model table, tool round trip, building a prompt, both endpoints with curl + status table, streaming
+  design notes, tests).
+- IDE note: the first `reformat_file` on `PromptRequest` wrapped a `{@code @NotEmpty}` Javadoc tag into a broken `@NotEmpty}` block
+  tag, and a stale IDE buffer then undid a disk edit. Fixed by rewording without `@` inside `{@code}` and editing through the `idea`
+  MCP `apply_patch`.
+- Verified: `./mvnw -pl spring-ai-training verify` → 24 unit/slice + 7 IT, 0 failures; full-reactor `./mvnw verify` → `BUILD SUCCESS`.
+  Not run: a live streamed call against the Anthropic API (spends the user's credits).
