@@ -4,7 +4,7 @@ import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionChunkResponse;
 import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionRequest;
 import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionResponse;
 import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionResponse.TokenUsage;
-import gr.codelearn.springbootai.ai.chat.internal.ChatModelUnavailableException;
+import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

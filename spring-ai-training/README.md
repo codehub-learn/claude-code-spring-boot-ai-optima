@@ -633,3 +633,86 @@ Rules of thumb:
 Ollama, `local,anthropic` → Anthropic, a typo and a missing value fail on the property. It also calls an Ollama address where
 nothing listens and checks that the failure comes back in seconds (about 8 s on Windows, where a refused connection itself
 takes a moment), not minutes.
+
+## U8 — Prompt Engineering
+
+### 8.1 Prompt templates
+
+**One template per use case.** Instead of letting clients send prompt text, each task gets its own endpoint and its own template
+file. The client sends only the values; the wording lives in `src/main/resources/prompts/writing/*.st`, next to the code, reviewed
+like code, and changed without touching Java:
+
+| Endpoint                            | Template                                 | Values                                                             |
+|-------------------------------------|------------------------------------------|--------------------------------------------------------------------|
+| `POST /api/v1/summaries`            | `prompts/writing/summary.st`             | `text`, `maxWords` (10-300), optional `audience`                   |
+| `POST /api/v1/product-descriptions` | `prompts/writing/product-description.st` | `name`, `category`, `features` (1-10), `tone`, optional `language` |
+
+The `writing` feature: `WritingController` → `WritingService` → `WritingPrompts` (one `PromptTemplate` per file, loaded once as a
+`Resource`) → the rendered text goes in as the **user** message through the central `ChatClient`. The application's system prompt
+(6.4) still comes first: the template is the task, the system prompt the standing rules.
+
+**Template syntax.** Spring AI renders templates with StringTemplate (ST), `{}` delimiters by default:
+
+```
+Summarize the text below in at most {maxWords} words.
+{if(audience)}Write the summary for this audience: {audience}.
+{endif}Keep to the facts in the text and add nothing of your own. ...
+
+Key features:
+{features:{feature | - {feature}
+}}
+Language: {if(language)}{language}{else}English{endif}.
+```
+
+- `{name}`: the value's `toString()` (strings, numbers, enums).
+- `{if(x)}...{else}...{endif}`: an optional part; a `null` value counts as absent.
+- `{list:{item | ...}}`: the inner template once per element; the line break inside it ends each bullet.
+
+Rendering it in Java:
+
+```java
+PromptTemplate template = new PromptTemplate(resource);          // or PromptTemplate.builder().resource(...).build()
+String text = template.render(Map.of("maxWords", 50, ...));      // or createMessage(...) / create(...) for a Message / Prompt
+```
+
+**Pitfalls**, each pinned by a test in `PromptTemplatesTest` (Spring AI 2.0.1):
+
+| Pitfall                                         | What happens                                                                                      | Fix                                                                                                              |
+|-------------------------------------------------|---------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| A variable missing from the map                 | `IllegalStateException`: "Not all variables were replaced ... [maxWords]"                         | good: the broken prompt never reaches the model                                                                  |
+| An *optional* variable missing from the map     | the same exception, even inside `{if(...)}`                                                       | put the key in with a `null` value (a `HashMap`: `Map.of` rejects nulls)                                         |
+| ST's `separator="..."` option on a list         | reported as a missing variable `separator`                                                        | put the line break inside the element template instead                                                           |
+| Literal braces in the text, e.g. a JSON example | `IllegalArgumentException`: "The template string is not valid"                                    | a renderer with other delimiters: `StTemplateRenderer.builder().startDelimiterToken('<').endDelimiterToken('>')` |
+| `ValidationMode.NONE` to silence the checks     | a missing value renders as an empty string, silently                                              | keep the default (`THROW`)                                                                                       |
+| Line breaks                                     | ST writes them as `System.lineSeparator()`: `\r\n` on Windows, from the template *and* the values | harmless for the model; tests normalize before comparing                                                         |
+
+Values are inserted as plain text and never parsed as template syntax, so a user's `{if(x)}` or braces can't break or extend
+the template. That is not the same as being safe: the model still reads the user's text, so instructions hidden in it are a
+prompt-injection risk (8.2).
+
+Try it (the `local` profile runs on Ollama, 7.4):
+
+```bash
+curl -s -X POST localhost:8080/api/v1/summaries -H 'Content-Type: application/json' \
+  -d '{"text":"Spring Boot 4.1 runs on Spring Framework 7 and Jakarta EE 11. ...","maxWords":30,"audience":"project managers"}'
+# {"content":"Spring Boot 4.1 uses Spring Framework 7 and Jakarta EE 11. It features modular auto-configuration, ...",
+#  "model":"qwen3.5:4b","usage":{"promptTokens":310,"completionTokens":36,"totalTokens":346}}
+
+curl -s -X POST localhost:8080/api/v1/product-descriptions -H 'Content-Type: application/json' \
+  -d '{"name":"Aurora X1 headphones","category":"Audio","features":["40-hour battery","active noise cancelling","USB-C fast charging"],
+       "tone":"friendly","language":"Greek"}'
+# {"content":"Τα ακουστικά Aurora X1 προσφέρουν ... ενεργή κατάργηση θορύβου και 40 ώρες ... γρήγορη φόρτιση μέσω USB-C ...", ...}
+```
+
+| Status | When                                                                                           |
+|--------|------------------------------------------------------------------------------------------------|
+| 200    | the generated text, the model name, the token usage                                            |
+| 400    | a validation failure (with an `errors` list), an unknown `tone`, or an unsupported API version |
+| 502    | the chat model is unreachable or failed                                                        |
+
+Also moved in 8.1, now that a second feature calls the model: `ChatModelUnavailableException` to `common` (shared kernel), and
+the system prompt's `{today}` filling to `config.ai.SystemPromptParams.fill`, used by `chat` and `writing` alike.
+
+**Tests.** `PromptTemplatesTest` (13, no model: variables, resources, `if`, lists, validation, the pitfalls above, `Message` /
+`Prompt` creation); `WritingPromptsTest` (5: the real templates rendered from requests); `WritingControllerTest` (7, `@WebMvcTest`);
+`WritingApiIT` (3: the system prompt then the rendered template reach a stub model, and the 502 path).

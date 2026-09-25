@@ -6,11 +6,11 @@ import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionResponse;
 import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionResponse.TokenUsage;
 import gr.codelearn.springbootai.ai.chat.dto.PromptRequest;
 import gr.codelearn.springbootai.ai.chat.dto.PromptRequest.PromptMessage;
-import gr.codelearn.springbootai.ai.chat.internal.ChatModelUnavailableException;
+import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
+import gr.codelearn.springbootai.ai.config.ai.SystemPromptParams;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.ChatClient.PromptSystemSpec;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -21,7 +21,6 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -40,7 +39,8 @@ import java.util.function.Supplier;
  * </ul>
  *
  * <p>Unit 6.4: the application's system prompt is the client's default ({@code prompts/chat-system.st}); every call here only fills its
- * {@code {today}} placeholder through {@link #withSystemParams}. {@code .system(Consumer)} adds parameters and keeps the default text,
+ * {@code {today}} placeholder through {@link SystemPromptParams#fill}. {@code .system(Consumer)} adds parameters and keeps the default
+ * text,
  * unlike {@code .system(String)}, which would replace it. What the caller sends always goes in as {@code user} / {@code assistant}
  * messages, never as system instructions.
  *
@@ -61,7 +61,7 @@ class ChatService {
 
 	ChatCompletionResponse complete(final ChatCompletionRequest request) {
 		return toResponse(callModel(() -> chatClient.prompt()
-													.system(ChatService::withSystemParams)
+													.system(SystemPromptParams::fill)
 													.user(request.message())
 													.call()
 													.chatResponse()));
@@ -71,23 +71,15 @@ class ChatService {
 		final List<Message> messages = request.messages().stream().map(ChatService::toMessage).toList();
 		// No ChatOptions: the model, max tokens, etc. come from spring.ai.anthropic.chat.* (a Prompt can override them per call).
 		final Prompt prompt = new Prompt(messages);
-		return toResponse(callModel(() -> chatClient.prompt(prompt).system(ChatService::withSystemParams).call().chatResponse()));
+		return toResponse(callModel(() -> chatClient.prompt(prompt).system(SystemPromptParams::fill).call().chatResponse()));
 	}
 
 	Flux<ChatCompletionChunkResponse> stream(final ChatCompletionRequest request) {
 		// defer: nothing, not even building the request, happens until the web layer subscribes.
-		return Flux.defer(() -> chatClient.prompt().system(ChatService::withSystemParams).user(request.message()).stream().content())
+		return Flux.defer(() -> chatClient.prompt().system(SystemPromptParams::fill).user(request.message()).stream().content())
 				   .map(ChatCompletionChunkResponse::new)
 				   .onErrorMap(ex -> !(ex instanceof ChatModelUnavailableException),
 							   ex -> new ChatModelUnavailableException(UNAVAILABLE, ex));
-	}
-
-	/**
-	 * Fills the placeholders of the default system prompt, keeping its text. Every call through the client needs it: without any parameter
-	 * the template is not rendered at all, and the model would read a literal {@code {today}}.
-	 */
-	private static void withSystemParams(final PromptSystemSpec system) {
-		system.param("today", LocalDate.now());
 	}
 
 	/**

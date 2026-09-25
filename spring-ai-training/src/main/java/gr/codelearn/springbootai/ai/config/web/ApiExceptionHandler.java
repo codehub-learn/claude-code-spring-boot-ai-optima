@@ -1,6 +1,6 @@
 package gr.codelearn.springbootai.ai.config.web;
 
-import gr.codelearn.springbootai.ai.chat.internal.ChatModelUnavailableException;
+import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -3,7 +3,7 @@ package gr.codelearn.springbootai.ai.chat;
 import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionChunkResponse;
 import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionRequest;
 import gr.codelearn.springbootai.ai.chat.dto.ChatCompletionResponse;
-import gr.codelearn.springbootai.ai.chat.internal.ChatModelUnavailableException;
+import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;

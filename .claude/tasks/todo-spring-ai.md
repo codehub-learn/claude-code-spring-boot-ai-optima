@@ -72,7 +72,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U8 — Prompt Engineering
 
-- [ ] **8.1 Prompt templates** — `PromptTemplate` / `.st` resource files under
+- [x] **8.1 Prompt templates** — `PromptTemplate` / `.st` resource files under
   `src/main/resources/prompts`, variable substitution, a reusable template per use case.
 - [ ] **8.2 Instruction vs context** — separating fixed instructions from per-call retrieved/user
   context in the same prompt, a demo contrasting a context-stuffed vs instruction-only prompt.
@@ -367,3 +367,30 @@ own module — no code here should be required for the Spring Boot units to buil
 - Verified live: `local` profile → startup log `provider=OLLAMA, model=qwen3.5:4b`, a chat call answered (200); with the Ollama
   container stopped → 502 in 7.3 s after 3 retries. Full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 40
   unit/slice + 8 IT, 0 failures). Not run: a live Anthropic call (spends the user's credits).
+
+### 8.1 Prompt templates (done)
+
+- User decisions: two use cases, **summaries** and **product descriptions**, in a new `writing` feature.
+- Templates `prompts/writing/summary.st` (`{maxWords}`, optional `{if(audience)}`, the text fenced in `"""`) and
+  `prompts/writing/product-description.st` (feature list `{features:{feature | - {feature}\n}}`, `{if(language)}...{else}English{endif}`,
+  tone). `WritingPrompts` loads each once as a `PromptTemplate` from its `Resource` and maps a request to the variables;
+  `WritingService` sends the rendered text as the user message through the central `ChatClient` (system prompt still first);
+  `WritingController`: `POST /api/v1/summaries`, `POST /api/v1/product-descriptions` (200 / 400 / 502). Records `SummaryRequest`,
+  `ProductDescriptionRequest` (+ lower-case `Tone` enum), `WritingResponse` (+ `TokenUsage`).
+- Refactor needed by the second model-calling feature: `ChatModelUnavailableException` moved `chat.internal` → `common` (shared
+  kernel; `chat.internal` removed), and the system prompt's `{today}` filling moved from `ChatService` to
+  `config.ai.SystemPromptParams.fill`. `chat` behaviour unchanged.
+- Findings (Spring AI 2.0.1, probed then pinned in `PromptTemplatesTest`): a missing variable throws `IllegalStateException` ("Not
+  all variables were replaced"), **also** for one used only inside `{if(...)}`, so optional values go in as `null` (HashMap);
+  ST's `separator="..."` list option is misread as a missing variable `separator` (workaround: line break inside the element
+  template); literal braces (a JSON example) make the template invalid (`IllegalArgumentException`) unless the renderer uses other
+  delimiters; `ValidationMode.NONE` renders a missing value as empty text; values are never parsed as template syntax; ST writes
+  every line break (template and values) as `System.lineSeparator()`, so on Windows the rendered prompt has `\r\n`. That broke the
+  first test run; tests now normalize.
+- Tests: `PromptTemplatesTest` (13), `WritingPromptsTest` (5), `WritingControllerTest` (7), `WritingApiIT` (3).
+- Verified live on Ollama (`local` profile, GPU): summary of a 70-word text with `maxWords: 30` → 24 words for the requested
+  audience; product description with `language: Greek` → one Greek paragraph naming all three features. Both endpoints in
+  `/v3/api-docs`. Not run: Anthropic.
+- Verified: `./mvnw -pl spring-ai-training verify` → 65 unit/slice + 11 IT, 0 failures. Full-reactor `./mvnw verify` failed
+  once in `spring-boot-training` (Testcontainers Oracle start timeout while the compose Oracle, Ollama and Open WebUI were running,
+  as seen in step 5); that module's `verify` passed on the retry. No code in that module changed.
