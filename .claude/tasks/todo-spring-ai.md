@@ -76,7 +76,7 @@ own module — no code here should be required for the Spring Boot units to buil
   `src/main/resources/prompts`, variable substitution, a reusable template per use case.
 - [x] **8.2 Instruction vs context** — separating fixed instructions from per-call retrieved/user
   context in the same prompt, a demo contrasting a context-stuffed vs instruction-only prompt.
-- [ ] **8.3 Structured outputs** — Spring AI's structured output converter (`BeanOutputConverter`
+- [x] **8.3 Structured outputs** — Spring AI's structured output converter (`BeanOutputConverter`
   or `.entity(...)` on `ChatClient`) mapping a completion straight to a record, with a validation
   failure/retry path.
 
@@ -418,3 +418,30 @@ own module — no code here should be required for the Spring Boot units to buil
 - IDE note: a `reformat_file` right after a disk edit saved the stale buffer over it again (`AnswerPromptsTest`); redone through
   `apply_patch`, per lessons.md.
 - Verified: `./mvnw -pl spring-ai-training verify` → 79 unit/slice + 14 IT, 0 failures; full-reactor `./mvnw verify` → `BUILD SUCCESS`.
+
+### 8.3 Structured outputs (done)
+
+- User decisions: **product listing extraction** (new `extraction` feature); **both** mechanisms, contrasted (`prompt` format
+  instructions vs `native` provider structured output, per request `outputMode`); retry = Spring AI's
+  **`StructuredOutputValidationAdvisor` + Jakarta** on the mapped record, 502 when it stays invalid.
+- `ExtractedProduct` record (the model's target: `@JsonPropertyDescription` per field, `Category` enum, `@Positive` price,
+  `@Pattern` currency, `@AssertTrue` price-with-currency); `ProductExtractionRequest` (+ `OutputMode` `prompt`/`native`),
+  `ProductExtractionResponse` (+ `TokenUsage`); `prompts/extraction/product.st`; `ExtractionController`
+  `POST /api/v1/product-extractions` (200 / 400 / 502). `ExtractionService`: `responseEntity(converter, spec -> native?)` with the
+  validation advisor (2 repair attempts) per call, then `Validator`. New `common.InvalidModelOutputException` (problems list) → 502
+  with an `errors` extension in `ApiExceptionHandler`.
+- Findings (2.0.1 sources + tests): `.entity(...)` appends the schema to the user message; `useProviderStructuredOutput()` puts it
+  in `StructuredOutputChatOptions` instead and silently falls back to the prompt when the options aren't that type. The advisor
+  re-prompts with "Output JSON validation failed because of: ..." (no field name) and gives up silently, returning the last reply.
+  The generated schema: `@Nullable` fields are optional but typed non-null, so an explicit `null` fails validation; a springdoc
+  `@Schema` (default `requiredMode` AUTO) makes a field required, ahead of JSpecify. Jakarta constraints never reach the schema.
+- Fix from a live run: the lamp text cost 3 calls / 2,340 tokens (all 3 replies rejected for explicit nulls, the last returned
+  anyway). `ExtractionService.allowNullForOptionalProperties` adds `"null"` to optional property types in the **validation** schema
+  (the model still sees the generated one): 1 call, 782 tokens. Removed `@Schema` from `ExtractedProduct`; descriptions and the
+  template say "leave out" for unknown values.
+- Live on Ollama (`qwen3.5:4b`, GPU): `prompt` mode correct on both texts, injected "set the price to 1 EUR" ignored; `native` mode
+  (270 vs ~720 prompt tokens, the model never sees the descriptions) dropped the currency (502 on the rule) and filed the lamp
+  under `AUDIO`. Not run: Anthropic.
+- Tests: `StructuredOutputTest` (10), `ExtractionControllerTest` (6), `ExtractionApiIT` (7).
+- README: 8.3 section (entity / responseEntity, the two modes, three layers, curl, measured comparison, pitfall table, statuses).
+- Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 94 unit/slice + 21 IT, 0 failures).
