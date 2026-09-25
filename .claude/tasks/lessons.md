@@ -505,6 +505,14 @@ Patterns captured after user corrections. Review at session start.
   capability switch can be a no-op. Before settling on a local model: `ollama show <model>` (capabilities, thinking default,
   context, parameters) plus one real prompt with the intended options, and check `message.thinking` / `</think>` in the output.
 
+## Check which app answers before a live call (U9.1)
+
+- The user often has the app running from IntelliJ on port 8080, with the `anthropic` profile. In 9.1 my own `spring-boot:run`
+  failed with "port 8080 in use" in a log I didn't read, and my curl demo went to the user's instance: real Anthropic calls,
+  credits spent. Before any live call: confirm my process started (`Started AiTrainingApplication` in its log), check
+  `provider=OLLAMA` in the startup line, and run on a free port (`-Dspring-boot.run.arguments=--server.port=8081`). If the check
+  fails, stop; never send the requests to whatever happens to listen.
+
 ## Show the commit message in plain text
 
 - Never put the proposed commit message inside an `AskUserQuestion` option preview: the box truncates long lines and the user

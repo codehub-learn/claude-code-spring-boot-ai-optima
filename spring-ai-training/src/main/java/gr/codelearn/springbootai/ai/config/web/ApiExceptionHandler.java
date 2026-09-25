@@ -2,6 +2,8 @@ package gr.codelearn.springbootai.ai.config.web;
 
 import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
 import gr.codelearn.springbootai.ai.common.InvalidModelOutputException;
+import gr.codelearn.springbootai.ai.conversation.ConversationLimitException;
+import gr.codelearn.springbootai.ai.conversation.ConversationNotFoundException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,7 +32,8 @@ import java.util.Map;
  * <ul>
  *   <li>a {@code @Valid} request body failure gets a machine-readable {@code errors} extension ({@code field} + {@code message});</li>
  *   <li>a failed model call becomes {@code 502 Bad Gateway}: the request was fine, the upstream LLM was not;</li>
- *   <li>so does unusable structured output (8.3), with the same {@code errors} extension naming the output's bad fields.</li>
+ *   <li>so does unusable structured output (8.3), with the same {@code errors} extension naming the output's bad fields;</li>
+ *   <li>an unknown conversation is {@code 404}, a full one (or a full store) {@code 409} (9.1).</li>
  * </ul>
  */
 @RestControllerAdvice
@@ -43,6 +46,16 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		// The cause carries the provider detail (connection refused, HTTP status); never the prompt itself.
 		log.warn("Chat model call failed: {}", ex.getMessage(), ex.getCause());
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
+	}
+
+	@ExceptionHandler(ConversationNotFoundException.class)
+	ProblemDetail handleConversationNotFound(final ConversationNotFoundException ex) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+	}
+
+	@ExceptionHandler(ConversationLimitException.class)
+	ProblemDetail handleConversationLimit(final ConversationLimitException ex) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
 	}
 
 	@ExceptionHandler(InvalidModelOutputException.class)

@@ -82,7 +82,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U9 — Conversational AI & Memory
 
-- [ ] **9.1 Stateless vs stateful conversations** — a stateless single-turn endpoint next to a
+- [x] **9.1 Stateless vs stateful conversations** — a stateless single-turn endpoint next to a
   stateful multi-turn one, showing the difference explicitly in the request/response shape.
 - [ ] **9.2 Memory lifecycle** — `ChatMemory` (message-window or repository-backed) wired as an
   `Advisor`, memory eviction/window-size config, a note on where memory is persisted (in-memory
@@ -445,3 +445,30 @@ own module — no code here should be required for the Spring Boot units to buil
 - Tests: `StructuredOutputTest` (10), `ExtractionControllerTest` (6), `ExtractionApiIT` (7).
 - README: 8.3 section (entity / responseEntity, the two modes, three layers, curl, measured comparison, pitfall table, statuses).
 - Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 94 unit/slice + 21 IT, 0 failures).
+
+### 9.1 Stateless vs stateful conversations (done)
+
+- User decisions: a **hand-rolled in-memory store** (ChatMemory + advisor stay in 9.2); a **conversation resource**
+  (`POST /conversations` 201 + `Location`, `POST|GET /conversations/{id}/messages`, `DELETE /conversations/{id}` 204); the stateless
+  side **reuses** 6.2's `/chat-completions` and 6.3's `/prompts` (no new endpoint).
+- `conversation` feature: `Conversation` (message list + a `ReentrantLock` held for the whole turn, model call included, so turns on
+  one conversation serialize without pinning virtual threads), `ConversationStore` (`ConcurrentHashMap`, bounded at 1,000, no
+  eviction), `ConversationService` (`.system(fill)` + `.messages(history)` + `.messages(user)`; the turn is stored only after a
+  successful call; 20-turn limit), `ConversationController`, DTO records, `ConversationNotFoundException` (404) and
+  `ConversationLimitException` (409) handled in `ApiExceptionHandler`.
+- Live on Ollama (`qwen3.5:4b`): turns 1-3 remembered the name, city and framework, prompt tokens 170 → 250 → 282; the stateless
+  `/chat-completions` didn't know the name (169 tokens); `/prompts` with the client-sent history did; delete → 204, then 404. A
+  devtools restart between two turns (the IDE recompiled `target/classes`) lost a conversation mid-demo: kept in the README as
+  the "in-memory state dies on restart" example.
+- Mistake along the way: my app failed to start because port 8080 was taken by the user's IntelliJ run with the `anthropic`
+  profile, and my curl calls went to that instance: ~6 Anthropic calls (~1,700 tokens) spent unintended. Rerun on port 8081 after
+  checking the startup log says `provider=OLLAMA`. See lessons.md.
+- **Found (not fixed, outside 9.1):** in those Anthropic replies turns 1 and 3 came back with `content: ""` but 124 / 46 completion
+  tokens. `AnthropicChatModel` (2.0.1 source) adds one `Generation` per thinking block **before** the text generation, and every
+  service here reads `response.getResult()` (the first generation), so a reply where Claude thinks first returns the thinking
+  block's (empty) text. Affects chat, writing, answer, conversation (which would also store the thinking block as the assistant
+  turn) and probably `.entity()`. Needs a fix and a few live Anthropic calls to verify; waiting for the user's go-ahead.
+- Tests: `ConversationStoreTest` (2), `ConversationControllerTest` (10), `ConversationApiIT` (6).
+- README: new U9 heading, 9.1 section (the three styles side by side, the resource, how a turn works, the store's limits, live
+  run, trade-off table, statuses).
+- Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 106 unit/slice + 27 IT, 0 failures).

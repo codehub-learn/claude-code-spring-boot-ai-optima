@@ -903,3 +903,94 @@ springdoc pitfall, both modes and the silent fallback, fence and `<think>` clean
 Jakarta after mapping); `ExtractionControllerTest` (6, `@WebMvcTest`); `ExtractionApiIT` (7: prompt vs native reaching the model,
 explicit nulls accepted in one call, a repaired enum with summed usage, giving up → 502 after 3 calls, a rule break → 502 with
 the fields, the provider outage).
+
+## U9 — Conversational AI & Memory
+
+### 9.1 Stateless vs stateful conversations
+
+**A model has no memory.** Every call is independent: the model knows only what that one request carries. A "conversation" is
+the application sending the earlier turns again each time. The only question is *who* keeps them:
+
+| Style                         | Endpoint                                       | The client sends                   | The server keeps     | The model sees                            |
+|-------------------------------|------------------------------------------------|------------------------------------|----------------------|-------------------------------------------|
+| Stateless, single turn (6.2)  | `POST /api/v1/chat-completions`                | `{"message": "..."}`               | nothing              | system prompt + this message              |
+| Stateless, multi-turn (6.3)   | `POST /api/v1/prompts`                         | the **whole** history, every turn  | nothing              | system prompt + everything the client sent |
+| **Stateful** (9.1)            | `POST /api/v1/conversations/{id}/messages`     | `{"content": "..."}`, the new message only | the history, by `id` | system prompt + stored turns + this message |
+
+The `conversation` feature makes the state a REST resource:
+
+| Request                                        | Response                                                              |
+|------------------------------------------------|-----------------------------------------------------------------------|
+| `POST /api/v1/conversations`                   | `201`, `Location: /api/v1/conversations/{id}`, `{"id", "createdAt"}`   |
+| `POST /api/v1/conversations/{id}/messages`     | `200`, `{"conversationId", "turn", "content", "model", "usage"}`      |
+| `GET /api/v1/conversations/{id}/messages`      | `200`, `[{"role": "user", "content"}, {"role": "assistant", ...}, ...]` |
+| `DELETE /api/v1/conversations/{id}`            | `204`                                                                 |
+
+**How a turn works** (`ConversationService.send`): load the history, call the model with
+`.system(...)`, `.messages(history)` and `.messages(newUserMessage)`, then store the user message and the reply as one turn. A
+failed call stores nothing, so a retry doesn't leave a question without an answer in the history. The whole turn runs under the
+conversation's own `ReentrantLock` (not `synchronized`, which would pin a virtual thread's carrier): two requests for the same
+conversation take turns, other conversations are not blocked.
+
+**The state is deliberately naive** (`ConversationStore`): a `ConcurrentHashMap` in this JVM's heap. Consequences you can see:
+
+- It is lost on restart. It happened during the live run: devtools restarted the app between two turns, and the next turn got a
+  404 for a conversation that had existed a second earlier.
+- It is not shared between instances: behind a load balancer, turn 2 can land on a server that never saw turn 1.
+- Every turn sends the whole history again, so the prompt grows each turn (see the token counts below) until it overflows the
+  context window.
+- It must be bounded or it leaks: at most 1,000 open conversations and 20 turns each, both answered with `409 Conflict` when
+  reached. No eviction and no window yet.
+
+9.2 replaces this store with Spring AI's `ChatMemory`: a message window instead of the hard turn limit, an `Advisor` instead
+of the hand-written history handling, and a repository that can outlive the process.
+
+**Live** (`local` profile, `qwen3.5:4b`):
+
+```bash
+curl -si -X POST localhost:8080/api/v1/conversations | grep Location
+# Location: http://localhost:8080/api/v1/conversations/9fbdf6fa-deb7-43e6-9805-420782b3a301
+C=localhost:8080/api/v1/conversations/9fbdf6fa-deb7-43e6-9805-420782b3a301
+
+curl -s -X POST $C/messages -H 'Content-Type: application/json' -d '{"content":"My name is Maria and I teach Spring Boot in Athens."}'
+# {"turn":1,"content":"Hello Maria! It's great to meet a fellow educator from Athens. ...","usage":{"promptTokens":170,...}}
+curl -s -X POST $C/messages -H 'Content-Type: application/json' -d '{"content":"What is my name, and where do I teach?"}'
+# {"turn":2,"content":"Your name is Maria, and you teach in Athens.","usage":{"promptTokens":250,...}}
+curl -s -X POST $C/messages -H 'Content-Type: application/json' -d '{"content":"Answer in one word: which framework do I teach?"}'
+# {"turn":3,"content":"Spring Boot","usage":{"promptTokens":282,...}}
+
+# The same question, stateless: the model has never heard of Maria.
+curl -s -X POST localhost:8080/api/v1/chat-completions -H 'Content-Type: application/json' \
+  -d '{"message":"What is my name, and where do I teach?"}'
+# {"content":"I don't have access to your personal information, such as your name or teaching location. ...","usage":{"promptTokens":169,...}}
+
+# Stateless multi-turn: it works again, because the client resent the history.
+curl -s -X POST localhost:8080/api/v1/prompts -H 'Content-Type: application/json' -d '{"messages":[
+  {"role":"user","content":"My name is Maria and I teach Spring Boot in Athens."},
+  {"role":"assistant","content":"Nice to meet you, Maria!"},
+  {"role":"user","content":"What is my name, and where do I teach?"}]}'
+# {"content":"Your name is Maria, and you teach Spring Boot in Athens.","usage":{"promptTokens":198,...}}
+```
+
+Prompt tokens: 170, 250, 282. Each turn pays again for every earlier one, which is the cost side of memory.
+
+| Stateless                                                     | Stateful                                                          |
+|---------------------------------------------------------------|-------------------------------------------------------------------|
+| any instance can answer; scales and restarts freely           | the state has to live somewhere every instance can reach          |
+| the client controls (and can forge) the history, see 6.4      | the server controls the history; the client can't rewrite it      |
+| the client resends everything: bigger requests                | small requests, same prompt size for the model                    |
+| nothing to clean up                                           | needs limits, expiry, deletion                                    |
+
+| Status | When                                                                                              |
+|--------|---------------------------------------------------------------------------------------------------|
+| 201    | a conversation was created (`Location` header)                                                    |
+| 200    | a turn's reply, or the history                                                                    |
+| 204    | deleted                                                                                           |
+| 400    | a blank or oversized message, a malformed id, or an unsupported API version                       |
+| 404    | no such conversation (never created, deleted, or lost on restart)                                 |
+| 409    | 20 turns reached, or 1,000 open conversations                                                     |
+| 502    | the chat model failed; the turn is not stored                                                     |
+
+**Tests.** `ConversationStoreTest` (2: find / delete, the bound); `ConversationControllerTest` (10, `@WebMvcTest`: 201 +
+`Location`, 200, 204, 400 for a blank message and a malformed id, 404, 409, 502); `ConversationApiIT` (6: turn 2's prompt
+carries turn 1, a stateless call and another conversation see no history, a failed turn isn't stored, the turn limit, delete).
