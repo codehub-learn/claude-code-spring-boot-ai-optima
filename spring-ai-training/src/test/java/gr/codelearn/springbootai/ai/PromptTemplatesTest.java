@@ -105,6 +105,30 @@ class PromptTemplatesTest {
 	}
 
 	@Test
+	void pitfallAListElementCanBeReferencedOnlyOnceInsideItsTemplate() {
+		// Unit 8.2. Plain ST renders {d.title} and {d.text} fine; Spring AI's validator accepts the element parameter's first reference
+		// and reports every later one as a missing variable. Workaround: render each element with its own template and list the results.
+		final List<Map<String, String>> documents = List.of(Map.of("title", "A", "text", "x"), Map.of("title", "B", "text", "y"));
+
+		assertThat(new PromptTemplate("{documents:{d | [{d.title}]}}").render(Map.of("documents", documents))).isEqualTo("[A][B]");
+		assertThatThrownBy(() -> new PromptTemplate("{documents:{d | [{d.title}: {d.text}]}}").render(Map.of("documents", documents)))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("Missing variable names are: [d]");
+	}
+
+	@Test
+	void pitfallRecordComponentsAreInvisibleToSt() {
+		// Unit 8.2. ST reads properties through getX() / isX() / hasX() or public fields. A record has none, so the value renders as
+		// empty text: no exception, only an error line in the log. A Map (or a JavaBean) works.
+		record Document(String title) {
+		}
+		final PromptTemplate template = new PromptTemplate("[{document.title}]");
+
+		assertThat(template.render(Map.of("document", new Document("Warranty")))).isEqualTo("[]");
+		assertThat(template.render(Map.of("document", Map.of("title", "Warranty")))).isEqualTo("[Warranty]");
+	}
+
+	@Test
 	void pitfallLiteralBracesClashWithTheDefaultDelimiters() {
 		// A JSON example in the prompt text is parsed as ST syntax and the template is rejected.
 		final PromptTemplate template = new PromptTemplate("Reply as JSON like {\"summary\": \"...\"} about {topic}.");
