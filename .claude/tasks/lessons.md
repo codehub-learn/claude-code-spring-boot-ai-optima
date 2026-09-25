@@ -498,6 +498,13 @@ Patterns captured after user corrections. Review at session start.
   standalone file and breaks fluent chains into one call per paragraph (`chatClient.prompt().` / blank / `system(...)`) and
   inserts blank lines after the fence. This mangled the 6.3 README block, unnoticed until 7.1. Leave README formatting alone.
 
+## Run a local model once before picking it (U7.2 / U7.3)
+
+- In 7.2 I picked `qwen3:4b` with `think: false` from docs and the Spring AI enum, without running it. On Ollama that tag had
+  become a thinking-only build that ignores `think: false`; it only showed up in 7.3's first live call. Tags move, and a
+  capability switch can be a no-op. Before settling on a local model: `ollama show <model>` (capabilities, thinking default,
+  context, parameters) plus one real prompt with the intended options, and check `message.thinking` / `</think>` in the output.
+
 ## Show the commit message in plain text
 
 - Never put the proposed commit message inside an `AskUserQuestion` option preview: the box truncates long lines and the user

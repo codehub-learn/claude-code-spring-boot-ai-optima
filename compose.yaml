@@ -2,6 +2,10 @@
 # The app does not manage this stack - application.yml points spring.datasource.* at
 # localhost:1521/FREEPDB1 and assumes it is up. `./mvnw flyway:migrate` targets the same. Integration
 # tests ignore this file and use Testcontainers instead.
+#
+# The local LLM (spring-ai-training, unit 7.3) sits behind the `ai` profile, so a plain `up -d` stays Oracle-only:
+#   docker compose --profile ai up -d                                          # Oracle + Ollama, CPU
+#   docker compose -f compose.yaml -f compose.gpu.yaml --profile ai up -d      # same, on an NVIDIA GPU
 services:
   oracle:
     # Oracle Database 23ai Free, "slim" variant: no APEX / sample schemas, so the smallest image and the
@@ -25,6 +29,8 @@ services:
       # Empty for now; kept for later seed data or extra grants. (Every-startup scripts would live in
       # /container-entrypoint-startdb.d.)
       - ./compose/oracle-init:/container-entrypoint-initdb.d
+    networks:
+      - db-network
     healthcheck:
       # The gvenzl image ships healthcheck.sh (listener up + database open). Compose and Boot wait on it.
       test: [ 'CMD', 'healthcheck.sh' ]
@@ -39,5 +45,90 @@ services:
     # Reap zombie processes left by the in-container process supervisor.
     init: true
 
+  ollama:
+    # Local LLM server for spring-ai-training (spring.ai.model.chat=ollama). Floating tag, like Oracle's `23-slim`.
+    image: ollama/ollama:latest
+    profiles: [ 'ai' ]
+    ports:
+      # Ollama's HTTP API; the Spring AI default spring.ai.ollama.base-url is http://localhost:11434.
+      - '11434:11434'
+    volumes:
+      # Pulled models (GBs) on a named volume: they survive `docker compose down` and are pulled only once.
+      - ollama-models:/root/.ollama
+    networks:
+      - llm-network
+    healthcheck:
+      # The image has no curl/wget; `ollama list` is a CLI call to the server's API, so it fails until the server answers.
+      test: [ 'CMD', 'ollama', 'list' ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  ollama-pull:
+    # One-shot: pulls the chat model once the server is healthy, then exits. A no-op when the model is already on the volume.
+    # Keep the model in sync with spring.ai.ollama.chat.model in spring-ai-training's application.yml (unit 7.2).
+    image: ollama/ollama:latest
+    profiles: [ 'ai' ]
+    environment:
+      # Point the CLI at the server container instead of a local one.
+      OLLAMA_HOST: http://ollama:11434
+    networks:
+      - llm-network
+    # The image's entrypoint is the ollama binary, so this runs `ollama pull qwen3.5:4b`. Keep it an argument list: a single
+    # string ("ollama pull ...") reaches the binary as one unknown sub-command and the pull fails.
+    #
+    # Alternatively, use combination of entrypoint and command.
+    # Breaking it down:
+    #
+    # entrypoint: [ "sh", "-lc" ]
+    #
+    # This replaces the container's default entrypoint with a shell invocation:
+    # sh runs the shell
+    # -l makes it a login shell (loads profile scripts like /etc/profile, which can matter for environment variables such as PATH)
+    # -c tells the shell to run the string that follows it as a command, rather than reading from stdin or a script file
+    # Put together, the container effectively runs: sh -lc "ollama pull qwen3.5:4b"
+    #
+    # A common reason to structure it this way rather than a plain command: ["ollama", "pull", "qwen3.5:4b"] is to allow shell features
+    # like variable expansion, chaining with &&, or piping, in case the real command block ends up being more than one line later.
+    entrypoint: [ "sh", "-lc" ]
+    command:
+      - |
+        ollama pull qwen3.5:4b
+    restart: 'no'
+    depends_on:
+      ollama:
+        condition: service_healthy
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    # Same profile as ollama, which it depends on: without it a plain `docker compose up -d` fails with
+    # "service open-webui depends on undefined service ollama".
+    profiles: [ 'ai' ]
+    ports:
+      - "4000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - open_webui_data:/app/backend/data
+    networks:
+      - llm-network
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: 1
+          memory: 1G
+        reservations:
+          cpus: 0.25
+          memory: 512M
+networks:
+  llm-network:
+  db-network:
+
 volumes:
   oracle-data:
+  ollama-models:
+  open_webui_data:

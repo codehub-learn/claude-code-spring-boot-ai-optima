@@ -197,12 +197,26 @@ ToolResponseMessage(responses = [ToolResponse(id = "call-1", name = "currentTime
 **Building a prompt.** The fluent API and a hand-built `Prompt` produce the same thing:
 
 ```java
-chatClient.prompt().system("Answer in one word.").user("Capital of Greece?").call().content();
+chatClient.prompt().
+
+system("Answer in one word.").
+
+user("Capital of Greece?").
+
+call().
+
+content();
 
 Prompt prompt = new Prompt(List.of(new SystemMessage("Answer in one word."), new UserMessage("Capital of Greece?"),
-								   new AssistantMessage("Athens."), new UserMessage("And of Italy?")),
-						   ChatOptions.builder().temperature(0.0).maxTokens(50).build());   // per-call options, optional
-chatClient.prompt(prompt).call().content();   // still goes through the default advisors
+		new AssistantMessage("Athens."), new UserMessage("And of Italy?")),
+		ChatOptions.builder().temperature(0.0).maxTokens(50).build());   // per-call options, optional
+chatClient.
+
+prompt(prompt).
+
+call().
+
+content();   // still goes through the default advisors
 ```
 
 `new Prompt("Hi")` is a single `UserMessage`. Options set on a `Prompt` override `spring.ai.anthropic.chat.*` for that call only.
@@ -297,6 +311,7 @@ Today is {today}.
 streaming, `/prompts`) sends it as the first message:
 
 ```java
+
 @Bean
 ChatClient chatClient(ChatClient.Builder builder, @Value("classpath:prompts/chat-system.st") Resource chatSystemPrompt) {
 	return builder.defaultSystem(chatSystemPrompt).defaultAdvisors(new SimpleLoggerAdvisor()).build();
@@ -356,16 +371,16 @@ turns. `PromptControllerTest` checks the `system` role is rejected.
 **Two runtimes, one interface.** Both are a `ChatModel` to Spring AI, so everything above the model (the central `ChatClient`, the
 system prompt, advisors, endpoints) is the same for both:
 
-|                 | Cloud: Anthropic Claude (`AnthropicChatModel`)                                                  | Offline: Ollama (`OllamaChatModel`)                                                          |
-|-----------------|-------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| Where it runs   | Anthropic's servers, over HTTPS                                                                 | an Ollama server you run (laptop, on-prem box, container; 7.3)                               |
-| Model quality   | frontier models: strongest reasoning, long context, reliable tool use                           | open-weight models small enough for local hardware; noticeably weaker on hard tasks          |
-| Latency         | network round trip + provider queueing; fast generation on large GPU fleets                     | no network; speed depends entirely on your CPU/GPU and model size; first call loads the model |
-| Cost            | pay per input/output token (see Anthropic's pricing page); nothing to run                       | no per-token fee; you pay for the hardware, power and upkeep                                 |
-| Data residency  | prompts and replies leave your network; `inference-geo` (`us` / `eu` / `global`) picks a region | nothing leaves the machine: fits air-gapped or strict data-protection setups                 |
-| Availability    | needs internet and an API key; subject to rate limits and provider outages                      | works offline; as available as the box it runs on                                            |
-| Scaling         | the provider's problem                                                                          | yours: concurrent users compete for the same GPU                                             |
-| Operations      | one env var (`ANTHROPIC_API_KEY`)                                                               | install and pull models, keep them updated, size the machine (7.2, 7.3)                      |
+|                | Cloud: Anthropic Claude (`AnthropicChatModel`)                                                  | Offline: Ollama (`OllamaChatModel`)                                                           |
+|----------------|-------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| Where it runs  | Anthropic's servers, over HTTPS                                                                 | an Ollama server you run (laptop, on-prem box, container; 7.3)                                |
+| Model quality  | frontier models: strongest reasoning, long context, reliable tool use                           | open-weight models small enough for local hardware; noticeably weaker on hard tasks           |
+| Latency        | network round trip + provider queueing; fast generation on large GPU fleets                     | no network; speed depends entirely on your CPU/GPU and model size; first call loads the model |
+| Cost           | pay per input/output token (see Anthropic's pricing page); nothing to run                       | no per-token fee; you pay for the hardware, power and upkeep                                  |
+| Data residency | prompts and replies leave your network; `inference-geo` (`us` / `eu` / `global`) picks a region | nothing leaves the machine: fits air-gapped or strict data-protection setups                  |
+| Availability   | needs internet and an API key; subject to rate limits and provider outages                      | works offline; as available as the box it runs on                                             |
+| Scaling        | the provider's problem                                                                          | yours: concurrent users compete for the same GPU                                              |
+| Operations     | one env var (`ANTHROPIC_API_KEY`)                                                               | install and pull models, keep them updated, size the machine (7.2, 7.3)                       |
 
 Rules of thumb: use the cloud when answer quality matters most and the data may leave the building; use a local model when it
 may not, when you must work offline, or for high-volume simple tasks where per-token cost adds up. Hybrid setups do both, e.g. a
@@ -403,8 +418,8 @@ and checks the `ChatModel` beans or the startup failure. No API key or Ollama se
 
 ### 7.2 Model selection and quantization
 
-A local model has to fit the machine it runs on. Two numbers decide that: how many **parameters** the model has, and how many
-**bits** each one is stored in.
+A local model has to fit the machine it runs on. Two numbers decide that: how many **parameters** the model has, and how many **bits** each
+one is stored in.
 
 **Size in memory.** Weights take roughly `parameters × bits per weight / 8` bytes, and the whole model must sit in RAM (CPU) or
 VRAM (GPU) while it answers. On top of that comes the **KV cache**, which grows with the context window (`num-ctx`), plus some
@@ -412,24 +427,26 @@ runtime overhead:
 
 ```
 memory ≈ weights + KV cache + overhead
-qwen3:4b at Q4_K_M, num-ctx 8192:  ~2.5 GB + ~1.2 GB + ~0.5 GB  ≈ 4 GB
+qwen3.5:4b at Q4_K_M, num-ctx 8192:  ~3.4 GB + ~0.25 GB + ~0.5 GB  ≈ 4.2 GB
 ```
 
-The KV cache is per token: 2 (key + value) × layers × KV heads × head size × 2 bytes. For Qwen3 4B that is
-2 × 36 × 8 × 128 × 2 ≈ 144 KB per token, so 8192 tokens cost ~1.2 GB. Doubling the context doubles it.
+The KV cache is per token: 2 (key + value) × attention layers × KV heads × head size × 2 bytes. Doubling the context doubles it.
+For a classic dense model like Qwen3 4B that is 2 × 36 × 8 × 128 × 2 ≈ 144 KB per token, so 8192 tokens cost ~1.2 GB. Qwen3.5 is a
+hybrid: only every 4th of its 32 layers is full attention, the rest keep a small fixed-size state, so it is 2 × 8 × 4 × 256 × 2 ≈
+32 KB per token and ~256 MB for 8192 tokens (figures from `ollama show --verbose qwen3.5:4b`).
 
 **Quantization** stores the weights in fewer bits than the 16 they were trained in. It trades a little answer quality for a lot
 less memory and more speed. The GGUF formats Ollama uses, with rough sizes for a 4B model:
 
-| Format   | Bits/weight (approx.) | 4B model (approx.) | Quality vs FP16                                        |
-|----------|-----------------------|--------------------|--------------------------------------------------------|
-| `fp16`   | 16                    | ~8 GB              | reference                                              |
-| `q8_0`   | 8.5                   | ~4.3 GB            | practically identical                                  |
-| `q6_K`   | 6.6                   | ~3.3 GB            | very close                                             |
-| `q5_K_M` | 5.7                   | ~2.9 GB            | close                                                  |
-| `q4_K_M` | 4.8                   | ~2.5 GB            | small loss; the usual sweet spot and Ollama's default  |
-| `q3_K_M` | 3.9                   | ~2.1 GB            | noticeable loss: more mistakes, weaker instructions    |
-| `q2_K`   | 3.4                   | ~1.7 GB            | heavy loss; only when nothing else fits                |
+| Format   | Bits/weight (approx.) | 4B model (approx.) | Quality vs FP16                                       |
+|----------|-----------------------|--------------------|-------------------------------------------------------|
+| `fp16`   | 16                    | ~8 GB              | reference                                             |
+| `q8_0`   | 8.5                   | ~4.3 GB            | practically identical                                 |
+| `q6_K`   | 6.6                   | ~3.3 GB            | very close                                            |
+| `q5_K_M` | 5.7                   | ~2.9 GB            | close                                                 |
+| `q4_K_M` | 4.8                   | ~2.5 GB            | small loss; the usual sweet spot and Ollama's default |
+| `q3_K_M` | 3.9                   | ~2.1 GB            | noticeable loss: more mistakes, weaker instructions   |
+| `q2_K`   | 3.4                   | ~1.7 GB            | heavy loss; only when nothing else fits               |
 
 The sizes are estimates; check the model's *Tags* page on ollama.com for the real ones.
 
@@ -442,34 +459,106 @@ does not fit in VRAM, Ollama splits it between GPU and CPU, and the CPU part set
 
 - A bigger model at `q4_K_M` usually beats a smaller one at `q8_0` of the same file size. Go below Q4 only if nothing else fits.
 - Pick an **instruct** (chat-tuned) model, not a base model: base models continue text instead of following instructions.
-- **Thinking** models reason at length before answering: better on hard problems, much slower. Turn it off for plain chat.
+- **Thinking** models reason at length before answering: better on hard problems, much slower. For plain chat switch it off, and
+  check that it really is off: some builds ignore the switch (see the pick below).
 - Check what the demo needs: tool calling (U11) and the languages your users write in (the system prompt says "reply in the
   user's language").
 - Leave room for the context window. A long `num-ctx` on a small machine can cost more than the weights.
 
 **Candidates for this course** (all instruct models at Ollama's default `q4_K_M`):
 
-| Model         | Size    | Tool calling | Languages                         | Notes                                     |
-|---------------|---------|--------------|-----------------------------------|-------------------------------------------|
-| `qwen3:1.7b`  | ~1.4 GB | yes          | 100+, incl. Greek                 | for weak or CPU-only laptops; weaker      |
-| `llama3.2:3b` | ~2.0 GB | yes          | 8 officially, mostly English      | long context (128K)                       |
-| `qwen3:4b`    | ~2.5 GB | yes          | 100+, incl. Greek                 | **picked**; hybrid thinking, turned off   |
-| `gemma3:4b`   | ~3.3 GB | no           | 140+                              | strong multilingual; no tools in Ollama   |
-| `mistral`     | ~4.1 GB | yes          | mostly European languages         | 7B; Spring AI's fallback when none is set |
+| Model               | Size    | Tool calling | Languages                    | Notes                                     |
+|---------------------|---------|--------------|------------------------------|-------------------------------------------|
+| `qwen3:1.7b`        | ~1.4 GB | yes          | 100+, incl. Greek            | for weak or CPU-only laptops; weaker      |
+| `llama3.2:3b`       | ~2.0 GB | yes          | 8 officially, mostly English | long context (128K)                       |
+| `qwen3:4b-instruct` | ~2.5 GB | yes          | 100+, incl. Greek            | non-thinking build, dense KV cache        |
+| `gemma3:4b`         | ~3.3 GB | no           | 140+                         | strong multilingual; no tools in Ollama   |
+| `qwen3.5:4b`        | ~3.4 GB | yes          | 100+, incl. Greek            | **picked**; 4.7B, hybrid thinking, vision |
+| `mistral`           | ~4.1 GB | yes          | mostly European languages    | 7B; Spring AI's fallback when none is set |
 
-**The pick: `qwen3:4b`.** It is the strongest of the small ones, runs on an ordinary laptop (about 4 GB with the context above),
-handles Greek, and supports tool calling for U11. Configured in `application.yml`, used only while `spring.ai.model.chat` is
-`ollama`:
+**The pick: `qwen3.5:4b`.** The newest and strongest of the small ones, it still runs on an ordinary laptop (about 4.2 GB with the
+context above), handles Greek, and supports tool calling for U11. Configured in `application.yml`, used only while
+`spring.ai.model.chat` is `ollama`:
 
 ```yaml
 spring.ai.ollama.chat:
-	model: qwen3:4b    # always set it: unset, Spring AI falls back to mistral (7B)
-	think: false       # Qwen3 thinks by default; off for faster, plain chat
-	num-ctx: 8192      # context window; its KV cache costs ~1.2 GB
+	model: qwen3.5:4b   # always set it: unset, Spring AI falls back to mistral (7B)
+	think: false        # Qwen3.5 thinks by default; off for plain chat
+	num-ctx: 8192       # context window; its KV cache costs ~256 MB
 ```
 
-A different quantization is a different tag, e.g. `qwen3:4b-q8_0` for near-FP16 quality at ~4.3 GB. Pulling the model and
-running Ollama in Docker is 7.3.
+**Thinking, measured** (found when the models first ran in 7.3; CPU = 4-CPU Docker VM, GPU = RTX 4060 Laptop, 8 GB):
 
-**Tests.** `ChatModelSelectionTest` also checks that the Ollama `ChatModel` gets `qwen3:4b`, thinking off and the 8192-token
+| Model               | Thinking                          | "Say hi in 3 words"                                                      |
+|---------------------|-----------------------------------|--------------------------------------------------------------------------|
+| `qwen3.5:4b`        | on by default                     | ~1200-1500 hidden thinking tokens: 3.5 min on CPU, 36 s on GPU           |
+| `qwen3.5:4b`        | `think: false`                    | 7 tokens: ~2 s on CPU, 0.35 s on GPU                                     |
+| `qwen3:4b`          | always on (*Thinking-2507* build) | ignores `think: false`; reasoning leaks into the reply before `</think>` |
+| `qwen3:4b-instruct` | none                              | answers directly                                                         |
+
+Lesson: a tag name is not a contract. Run `ollama show <model>` (the *Capabilities* block lists `thinking` and its default) and one
+real prompt before settling on a model.
+
+A different quantization is a different tag: the model's *Tags* page on ollama.com lists them with a suffix such as `-q8_0`
+(near-FP16 quality, ~4.3 GB for 4B). Pulling the model and running Ollama in Docker is 7.3.
+
+**Tests.** `ChatModelSelectionTest` also checks that the Ollama `ChatModel` gets `qwen3.5:4b`, thinking off and the 8192-token
 context from configuration. It reads the bean's options only, so no Ollama server is needed.
+
+### 7.3 Docker deployment
+
+Ollama runs as a container in the repo's `compose.yaml`, next to Oracle, behind a compose **profile** so that the Spring Boot
+module's plain `docker compose up -d` does not download or run it:
+
+```bash
+docker compose --profile ai up -d                                        # Oracle + Ollama on CPU
+docker compose -f compose.yaml -f compose.gpu.yaml --profile ai up -d    # same, on an NVIDIA GPU
+docker compose --profile ai up -d ollama ollama-pull                     # Ollama only
+docker compose --profile ai down                                         # stop; models stay on the volume
+```
+
+The `ai` profile's services:
+
+| Service       | What it does                                                                                              |
+|---------------|-----------------------------------------------------------------------------------------------------------|
+| `ollama`      | the server (`ollama/ollama:latest`) on port `11434`, models on the `ollama-models` volume; health-checked |
+| `ollama-pull` | one-shot: waits until `ollama` is healthy, runs `ollama pull qwen3.5:4b`, exits                           |
+| `open-webui`  | optional chat UI at `http://localhost:3000` for trying the models by hand, outside the app                |
+
+- **Health check.** Like the Oracle service, the container reports `healthy` only when the server really answers. The image has
+  no `curl`, so the check is `ollama list`, a CLI call to the server's own API.
+- **Pulling the model.** Ollama starts with no models. The one-shot service pulls the model 7.2 picked (~3.4 GB, once; later
+  runs find it on the volume and finish in seconds). The app does not pull anything: Spring AI's
+  `spring.ai.ollama.init.pull-model-strategy` stays at its default, `never`, so a missing model is a clear error on the first
+  call instead of a silent multi-GB download at startup. Keep the tag in `compose.yaml` and `spring.ai.ollama.chat.model` in sync.
+- **GPU.** CPU by default, so it runs anywhere. `compose.gpu.yaml` adds an NVIDIA device reservation; it is a separate file
+  because the reservation stops the container from starting on a machine without an NVIDIA GPU (on Windows, Docker Desktop with
+  WSL 2 GPU support). `docker compose logs ollama` shows what Ollama found: `inference compute ... library=cpu` means no GPU.
+- **Memory.** On CPU, Docker Desktop's VM needs room for both: Oracle plus ~4-5 GB for Ollama with `qwen3.5:4b` and an
+  8192-token context. On a GPU the model sits in VRAM instead: `ollama ps` shows 3.3 GB, `100% GPU` on an 8 GB card.
+
+**Speed, measured** with `qwen3.5:4b`, `think: false` and an 8192-token context:
+
+|                                                     | CPU only (4-CPU, 8 GB Docker VM) | GPU (RTX 4060 Laptop, 8 GB, `compose.gpu.yaml`) |
+|-----------------------------------------------------|----------------------------------|-------------------------------------------------|
+| Loading the model (first call after start / idle)   | ~7 s                             | ~9 s                                            |
+| Generation                                          | ~6 tokens/s                      | ~45 tokens/s                                    |
+| Reading the prompt (2,300-token RAG-style context)  | not measured                     | ~1,750 tokens/s                                 |
+| One-sentence English answer via the app (65 tokens) | ~17 s                            | ~1.6 s                                          |
+| Greek one-liner via the app (15 tokens)             | ~9 s                             | ~0.5 s                                          |
+
+On a GPU the local model feels interactive; on CPU it works but is slow, and thinking left on makes it unusable. Ollama unloads an
+idle model after 5 minutes (`OLLAMA_KEEP_ALIVE`), so the next call pays the load time again.
+
+Run the app against it:
+
+```bash
+./mvnw -pl spring-ai-training spring-boot:run -Dspring-boot.run.arguments=--spring.ai.model.chat=ollama
+
+curl -s -X POST localhost:8080/api/v1/chat-completions -H 'Content-Type: application/json' \
+  -d '{"message":"In one sentence: what is quantization in LLMs?"}'
+# {"content":"Quantization in Large Language Models (LLMs) is a technique that ...","model":"qwen3.5:4b","usage":{...}}
+```
+
+Check the server by hand: `docker compose exec ollama ollama list` (pulled models), `ollama ps` (loaded models, CPU/GPU split),
+`ollama show qwen3.5:4b` (context length, capabilities, quantization).

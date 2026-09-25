@@ -1,0 +1,13 @@
+# Opt-in NVIDIA GPU for the Ollama service (spring-ai-training, unit 7.3). Layer it over compose.yaml:
+#   docker compose -f compose.yaml -f compose.gpu.yaml --profile ai up -d
+# Kept out of compose.yaml because a GPU reservation stops the container from starting on a machine without an NVIDIA GPU
+# (and on Docker Desktop, without the WSL 2 GPU support). Check it took: `docker compose logs ollama` reports the GPU it found.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]

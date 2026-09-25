@@ -54,7 +54,7 @@ class ChatModelSelectionTest {
 		// Unit 7.2: application.yml names the local model. Unset, OllamaChatOptions would fall back to mistral (7B).
 		try (ConfigurableApplicationContext context = start("--spring.ai.model.chat=ollama")) {
 			OllamaChatOptions options = context.getBean(OllamaChatModel.class).getOptions();
-			assertThat(options.getModel()).isEqualTo("qwen3:4b");
+			assertThat(options.getModel()).isEqualTo("qwen3.5:4b");
 			assertThat(options.getThinkOption()).isEqualTo(ThinkOption.ThinkBoolean.DISABLED);
 			assertThat(options.getNumCtx()).isEqualTo(8192);
 		}

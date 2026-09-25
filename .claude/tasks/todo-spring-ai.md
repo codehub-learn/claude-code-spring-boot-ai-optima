@@ -63,7 +63,7 @@ own module — no code here should be required for the Spring Boot units to buil
   rather than hardcoded provider.
 - [x] **7.2 Model selection & quantization** — a written note on model size/quantization
   trade-offs for local inference, picking a small instruct model for the offline demo.
-- [ ] **7.3 Docker deployment** — an Ollama service wired into `compose.yaml`, health-checked like
+- [x] **7.3 Docker deployment** — an Ollama service wired into `compose.yaml`, health-checked like
   the existing Oracle service, plus the Spring AI Ollama starter dependency.
 - [ ] **7.4 Switching between cloud / local** — a `@ConfigurationProperties`-driven profile switch (`application-local.yml` on Ollama vs a
   cloud profile on Anthropic) that swaps the active
@@ -305,3 +305,35 @@ own module — no code here should be required for the Spring Boot units to buil
   not installed on this machine, so no tag or size was checked live. README not run through the IDE reformat (see lessons.md).
 - Verified: `./mvnw -pl spring-ai-training verify` → 37 unit/slice + 8 IT, 0 failures; full-reactor `./mvnw verify` →
   `BUILD SUCCESS`. Not run: a live call against Ollama.
+
+### 7.3 Docker deployment (done)
+
+- User decisions: a one-shot `ollama-pull` compose service pulls the model (the app keeps Spring AI's `pull-model-strategy: never`);
+  Ollama sits behind the compose profile `ai` so a plain `docker compose up -d` stays Oracle-only; `ollama/ollama:latest`; the
+  NVIDIA GPU reservation is opt-in via a separate `compose.gpu.yaml`. The Ollama starter was already added in 7.1.
+- `compose.yaml`: `ollama` (port 11434, `ollama-models` volume, health check `ollama list` since the image has no curl/wget) and
+  `ollama-pull` (`depends_on: service_healthy`, `OLLAMA_HOST=http://ollama:11434`, `command: [pull, <model>]`, `restart: no`).
+- **7.2 model changed (user decision, after live runs):** the first live run showed Ollama's `qwen3:4b` tag is now the
+  *Thinking-2507* build: it ignores `think: false` and leaks its reasoning into the reply (`...</think>`), ~250 tokens / ~1 min for
+  one sentence on CPU. I switched to `qwen3:4b-instruct`; the user then picked **`qwen3.5:4b`** (4.7B, ~3.4 GB, hybrid attention).
+  Measured: thinking on by default (~1200 tokens / 3.5 min for "say hi in 3 words"), `think: false` works (7 tokens / ~2 s), so
+  `think: false` is back in `application.yml` and asserted in `ChatModelSelectionTest`. KV cache recomputed from
+  `ollama show --verbose`: 8 attention layers × 4 KV heads × 256 → ~32 KB/token, ~256 MB at 8192. README 7.2 updated to match
+  (memory example, candidate table, measured thinking table, "a tag is not a contract").
+- Found along the way: a mid-session edit turned the pull `command` into a single block-scalar string; the binary got
+  `"ollama pull qwen3:4b\n"` as one unknown sub-command (reproduced with `docker compose run`). The user then settled on
+  `entrypoint: [sh, -lc]` + the block-scalar command, which runs it through a shell (verified: pull `success`).
+- User addition: an `open-webui` chat UI service (port 3000). It lacked the `ai` profile while depending on `ollama`, so a plain
+  `docker compose up -d` failed ("depends on undefined service ollama"); added `profiles: [ 'ai' ]`, checked with `docker compose
+  config --services` (plain: oracle only; `--profile ai`: all four). Port 3000 is also Grafana's in CLAUDE.md: a future clash.
+- GPU verified: with `compose.gpu.yaml` Ollama logs `library=CUDA ... RTX 4060 Laptop GPU`, `ollama ps` shows `100% GPU`.
+  `qwen3.5:4b` ~45 tokens/s (CPU ~6), app one-sentence answer ~1.6 s (CPU ~17 s); README 7.2/7.3 carry both CPU and GPU numbers.
+- Model comparison (user question, GPU, `think: false`, 10 catalog lookups over a 2,300-token context + Greek + one tool call):
+  `qwen3.5:4b` 10/10, best Greek, 49 tok/s; `qwen3:4b-instruct` 10/10, wordier, 63 tok/s; `ministral-3:3b` 7/10 (invented
+  prices), 73 tok/s; `qwen3.5:2b` 7/10, broken Greek. All made the tool call. Kept `qwen3.5:4b`.
+- Verified live (CPU only, 4-CPU / 8 GB Docker VM): `docker compose --profile ai up -d ollama ollama-pull` → `ollama` healthy in
+  ~6 s, pull exits 0, `ollama list` shows `qwen3.5:4b`; the app with `--spring.ai.model.chat=ollama` answered
+  `POST /api/v1/chat-completions` in English (~17 s) and in Greek (~9 s, reply in Greek), no thinking text. `compose.gpu.yaml`
+  checked with `docker compose config` only (no GPU run). README: 7.3 section (commands, services, health check, pulling, GPU,
+  memory/speed, running the app).
+- Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 37 unit/slice + 8 IT, 0 failures).
