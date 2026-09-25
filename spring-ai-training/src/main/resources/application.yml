@@ -9,10 +9,19 @@ spring:
     model:
       # Unit 7.1: which provider's ChatModel bean is created. Both starters (Anthropic, Ollama) are on the classpath and each one's chat
       # autoconfig is active only when this names it; left unset, BOTH activate (matchIfMissing) and the ChatClient.Builder fails on
-      # two ChatModel beans. anthropic = cloud (default), ollama = local/offline.
-      chat: anthropic
+      # two ChatModel beans. Unit 7.4: never set it directly; it follows the validated app.ai.chat-provider (bottom of this file).
+      chat: ${app.ai.chat-provider}
       # The Ollama starter also brings an EmbeddingModel. Embeddings arrive with RAG in U10; until then, none.
       embedding: none
+    retry:
+      # Unit 7.4: Spring AI's RetryTemplate, used by the Ollama path only (Anthropic retries inside its own SDK, see max-retries below).
+      # The defaults are 10 attempts with an uncapped 2 s x5 backoff: with Ollama down a request hung for minutes. Capped so a dead
+      # server fails in seconds, as a 502. 4xx responses (e.g. a model that was never pulled) are not retried at all.
+      max-attempts: 3
+      backoff:
+        initial-interval: 1s
+        multiplier: 2
+        max-interval: 5s
     # See for details: https://docs.spring.io/spring-ai/reference/api/chat/ollama-chat.html
     ollama:
       chat:
@@ -23,7 +32,7 @@ spring:
         # Qwen3.5 is a hybrid model that thinks before answering by default: measured on CPU, "say hi in 3 words" took ~1200 thinking
         # tokens and 3.5 minutes, against 7 tokens and ~2 s with thinking off. Off for plain chat.
         think: false
-        # Context window in tokens (system prompt + history + reply). Its KV cache costs memory on top of the weights: ~1.2 GB here.
+        # Context window in tokens (system prompt + history + reply). Its KV cache costs memory on top of the weights: ~256 MB here.
         num-ctx: 8192
     # See for details: https://docs.spring.io/spring-ai/reference/api/chat/anthropic-chat.html
     anthropic:
@@ -109,3 +118,10 @@ logging:
         name: ${spring.application.name}
         version: "@project.version@"
         environment: ${spring.profiles.active:default}
+
+# Application-owned settings, bound to validated records (config.ai.AiProperties).
+app:
+  ai:
+    # Unit 7.4: the one switch between the cloud and the local chat model: anthropic | ollama. Feeds spring.ai.model.chat (top of
+    # this file). Default: the cloud. The `local` profile switches to ollama, the `anthropic` profile back to anthropic.
+    chat-provider: anthropic

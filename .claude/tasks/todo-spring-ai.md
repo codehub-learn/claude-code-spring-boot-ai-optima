@@ -65,7 +65,7 @@ own module — no code here should be required for the Spring Boot units to buil
   trade-offs for local inference, picking a small instruct model for the offline demo.
 - [x] **7.3 Docker deployment** — an Ollama service wired into `compose.yaml`, health-checked like
   the existing Oracle service, plus the Spring AI Ollama starter dependency.
-- [ ] **7.4 Switching between cloud / local** — a `@ConfigurationProperties`-driven profile switch (`application-local.yml` on Ollama vs a
+- [x] **7.4 Switching between cloud / local** — a `@ConfigurationProperties`-driven profile switch (`application-local.yml` on Ollama vs a
   cloud profile on Anthropic) that swaps the active
   `ChatModel` without code changes, plus a resilience note (Spring Retry / timeouts) for the
   Anthropic-backed path.
@@ -337,3 +337,33 @@ own module — no code here should be required for the Spring Boot units to buil
   checked with `docker compose config` only (no GPU run). README: 7.3 section (commands, services, health check, pulling, GPU,
   memory/speed, running the app).
 - Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 37 unit/slice + 8 IT, 0 failures).
+
+### 7.4 Switching between cloud / local (done)
+
+- User decisions: the switch is an app-owned `app.ai.chat-provider` bound to a validated record; the cloud profile is named
+  `anthropic`; resilience = README note **plus** capping Spring AI's retry for the Ollama path.
+- `config.ai.AiProperties` (`@Validated @ConfigurationProperties("app.ai")`, `@NotNull ChatProvider chatProvider`, enum `ANTHROPIC`,
+  `OLLAMA`). `application.yml`: `spring.ai.model.chat: ${app.ai.chat-provider}`, `app.ai.chat-provider: anthropic`.
+  `application-local.yml` → `ollama`; new `application-anthropic.yml` → `anthropic` (so `local,anthropic` = local dev on Claude).
+- `ChatClientConfig.chatClient(...)` takes `AiProperties` first (so the property is bound and validated before the builder's
+  `ChatModel` lookup) and the `ChatModel`, and logs `Chat model: provider=..., model=...` at INFO. A typo now fails with
+  "Failed to bind properties under 'app.ai.chat-provider' ... No enum constant ...openai" instead of 7.1's
+  `NoSuchBeanDefinitionException`; a missing value fails the `@NotNull` before the two `ChatModel` beans collide.
+- Findings: `AnthropicChatModel` has no Spring `RetryTemplate`; the Anthropic Java SDK (2.52.0, bytecode) retries IO errors, 408,
+  409, 429, >=500, honours `X-Should-Retry` / `Retry-After(-Ms)`, backoff 0.5 s x2 up to 8 s with jitter, so `spring.ai.retry.*` never
+  applies to it. The Ollama path uses `spring-ai-autoconfigure-retry`'s `RetryTemplate` (Framework 7 core retry): defaults 10 retries,
+  2 s x5, uncapped. Measured with Ollama unreachable: still hanging after 150 s (retries at 2, 10, 50 s...).
+- `application.yml` `spring.ai.retry`: `max-attempts: 3`, backoff `1s` x`2`, max `5s`. Measured: `max-attempts` counts retries
+  after the first call (log "Retry count" 1-3); Ollama stopped mid-session → 502 `ProblemDetail` after ~7 s (waits 1, 2, 4 s).
+- `ChatModelSelectionTest` reworked to switch through `app.ai.chat-provider` and profiles (9 tests: default, property, `local`,
+  `local,anthropic`, embedding off, 7.2 model options, typo, unset, dead Ollama fails in < 20 s, ~8 s on Windows).
+  `ChatClientConfigTest`'s runner gets an `AiProperties` bean. Caught while writing it: a `start(String...)` / `start(String[],
+  String...)` overload pair silently passed the profile array as command-line args (Java picks the non-varargs match first), and
+  the `local,anthropic` test passed for the wrong reason; replaced by a separately named `startWithProfiles`.
+- Also fixed: the `num-ctx` comment in `application.yml` still said ~1.2 GB KV cache (the Qwen3 dense figure); now ~256 MB.
+- README: 7.4 section (the switch, profile table, run commands, typo error, the resilience comparison table, measured
+  before/after, rules of thumb: one retry layer, Framework 7 core retry instead of the Spring Retry library, streaming, circuit
+  breaker, tools). 6.2's run command now uses `local,anthropic`; 7.1 and 7.3 point to the new switch.
+- Verified live: `local` profile → startup log `provider=OLLAMA, model=qwen3.5:4b`, a chat call answered (200); with the Ollama
+  container stopped → 502 in 7.3 s after 3 retries. Full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 40
+  unit/slice + 8 IT, 0 failures). Not run: a live Anthropic call (spends the user's credits).

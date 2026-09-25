@@ -1,7 +1,10 @@
 package gr.codelearn.springbootai.ai.config.ai;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,13 +30,20 @@ import org.springframework.core.io.Resource;
  *   <li>a {@code SystemMessage} passed inside {@code prompt(Prompt)} or {@code .messages(...)} is <em>added</em> after it, so a second set
  *   of system instructions competes with the application's. That is why {@code /api/v1/prompts} does not accept a {@code system} role.</li>
  * </ul>
+ *
+ * <p>Unit 7.4: which {@code ChatModel} is underneath is decided by {@link AiProperties} ({@code app.ai.chat-provider}), never by code
+ * here. The properties come first in the parameter list so a bad value fails their validation before the builder's {@code ChatModel}
+ * lookup can fail with a less helpful error. The startup log names the provider and model actually in use.
  */
 @Configuration
 class ChatClientConfig {
 
+	private static final Logger log = LoggerFactory.getLogger(ChatClientConfig.class);
+
 	@Bean
-	ChatClient chatClient(final ChatClient.Builder builder,
+	ChatClient chatClient(final AiProperties aiProperties, final ChatClient.Builder builder, final ChatModel chatModel,
 						  @Value("classpath:prompts/chat-system.st") final Resource chatSystemPrompt) {
+		log.info("Chat model: provider={}, model={}", aiProperties.chatProvider(), chatModel.getDefaultOptions().getModel());
 		return builder.defaultSystem(chatSystemPrompt).defaultAdvisors(new SimpleLoggerAdvisor()).build();
 	}
 }

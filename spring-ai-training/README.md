@@ -114,7 +114,7 @@ The local Ollama runtime and cloud-vs-local switching come later, in U7. Config 
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...             # or set it once as a user environment variable
-./mvnw -pl spring-ai-training spring-boot:run
+./mvnw -pl spring-ai-training spring-boot:run -Dspring-boot.run.profiles=local,anthropic   # since 7.4, plain `local` runs on Ollama
 ```
 
 **One central `ChatClient`.** `config/ai/ChatClientConfig` turns the auto-configured `ChatClient.Builder` into the single
@@ -406,12 +406,8 @@ The last two rows are why `application.yml` always sets the property explicitly.
 `ChatClient`, and `ChatClientConfig` builds it from whichever `ChatModel` exists. Neither client connects at startup, so the app
 starts even when Ollama isn't running or no API key is set; the first call then fails with a 502.
 
-Switching today is a command-line override. The profile-based switch is 7.4, running Ollama in Docker is 7.3, and picking the
-local model is 7.2:
-
-```bash
-./mvnw -pl spring-ai-training spring-boot:run -Dspring-boot.run.arguments=--spring.ai.model.chat=ollama
-```
+In 7.1 switching was a command-line override of `spring.ai.model.chat`. Since 7.4 that property follows the validated
+`app.ai.chat-provider` and the profiles set it; see 7.4. Running Ollama in Docker is 7.3, and picking the local model is 7.2.
 
 **Tests.** `ChatModelSelectionTest` starts the real application (no web server, `test` profile) once per row of the table above
 and checks the `ChatModel` beans or the startup failure. No API key or Ollama server is needed.
@@ -553,7 +549,7 @@ idle model after 5 minutes (`OLLAMA_KEEP_ALIVE`), so the next call pays the load
 Run the app against it:
 
 ```bash
-./mvnw -pl spring-ai-training spring-boot:run -Dspring-boot.run.arguments=--spring.ai.model.chat=ollama
+./mvnw -pl spring-ai-training spring-boot:run      # the `local` profile runs on Ollama (7.4)
 
 curl -s -X POST localhost:8080/api/v1/chat-completions -H 'Content-Type: application/json' \
   -d '{"message":"In one sentence: what is quantization in LLMs?"}'
@@ -562,3 +558,78 @@ curl -s -X POST localhost:8080/api/v1/chat-completions -H 'Content-Type: applica
 
 Check the server by hand: `docker compose exec ollama ollama list` (pulled models), `ollama ps` (loaded models, CPU/GPU split),
 `ollama show qwen3.5:4b` (context length, capabilities, quantization).
+
+### 7.4 Switching between cloud and local
+
+**One switch, bound and validated.** The provider is the application's own property, `app.ai.chat-provider`, bound to the record
+`config.ai.AiProperties` (an enum, `anthropic` or `ollama`). `application.yml` passes it on to Spring AI's selector from 7.1:
+
+```yaml
+spring.ai.model.chat: ${app.ai.chat-provider}   # never set directly
+app.ai.chat-provider: anthropic                 # the default: the cloud
+```
+
+The profiles only set that one key:
+
+| Active profiles                                         | `app.ai.chat-provider`        | `ChatModel`                                    |
+|---------------------------------------------------------|-------------------------------|------------------------------------------------|
+| none                                                    | `anthropic` (application.yml) | `AnthropicChatModel`                           |
+| `local` (what `./mvnw spring-boot:run` activates)       | `ollama`                      | `OllamaChatModel` (`qwen3.5:4b`)               |
+| `anthropic`                                             | `anthropic`                   | `AnthropicChatModel`                           |
+| `local,anthropic`                                       | `anthropic` (last one wins)   | `AnthropicChatModel`, with the local dev setup |
+
+```bash
+./mvnw -pl spring-ai-training spring-boot:run                                              # local: Ollama
+./mvnw -pl spring-ai-training spring-boot:run -Dspring-boot.run.profiles=local,anthropic   # local dev on Claude
+java -jar spring-ai-training/target/spring-ai-training-0.0.1-SNAPSHOT.jar --spring.profiles.active=anthropic
+```
+
+No feature code knows which one runs. The startup log says it: `Chat model: provider=OLLAMA, model=qwen3.5:4b`.
+
+Why a record instead of setting `spring.ai.model.chat` in the profiles: a bad value now fails on the property itself. In 7.1 a typo
+left no `ChatModel` and ended in a `NoSuchBeanDefinitionException`; now it reads:
+
+```
+Failed to bind properties under 'app.ai.chat-provider' to gr.codelearn.springbootai.ai.config.ai.AiProperties$ChatProvider:
+    Property: app.ai.chat-provider
+    Value: "openai"
+    Reason: failed to convert java.lang.String to ... (caused by ... No enum constant ...ChatProvider.openai)
+```
+
+A missing value fails the record's `@NotNull` before the two `ChatModel` beans can collide. `ChatClientConfig` takes
+`AiProperties` as its first dependency so it is always validated before the builder looks for a `ChatModel`. Don't override
+`spring.ai.model.chat` directly: it would win over the placeholder, and the log line would name one provider while the other runs.
+
+**Resilience.** The two providers retry in different places, with different settings:
+
+|                   | Anthropic (cloud)                                                    | Ollama (local)                                                        |
+|-------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------|
+| Who retries       | the Anthropic Java SDK inside `AnthropicChatModel`                   | Spring AI's `RetryTemplate` (Spring Framework 7 core retry)           |
+| Settings          | `spring.ai.anthropic.max-retries: 2`, `timeout: 60s`                 | `spring.ai.retry.*`                                                   |
+| What is retried   | connection errors, 408, 409, 429, 5xx; honours `Retry-After`         | connection errors and 5xx; 4xx never (e.g. a model that isn't pulled) |
+| Backoff           | 0.5 s, doubling up to 8 s, with jitter                               | was 2 s x5, uncapped, 10 retries; now 1 s x2, max 5 s, 3 retries      |
+| Per-attempt limit | 60 s (the SDK default is 10 minutes)                                 | none set: a long generation holds the request                         |
+
+`spring.ai.retry.*` does nothing for Anthropic, and `max-retries` does nothing for Ollama. Worst case on the cloud path:
+3 attempts x 60 s plus backoff, about 3 minutes before the 502.
+
+The Ollama defaults were the surprise. With Ollama stopped, a request was still hanging after 150 s (retries at 2 s, 10 s, 50 s,
+then 250 s). With the caps in `application.yml` it is 1 call + 3 retries, waiting 1 s, 2 s and 4 s, and the client gets the usual
+502 `ProblemDetail` after about 7 s.
+
+Rules of thumb:
+
+- **One retry layer only.** Don't put a `@Retryable` on `ChatService` on top of the provider's own retries: attempts multiply
+  (3 x 3 = 9 calls, each one billed by Anthropic if it reached the model).
+- **No new library for it.** CLAUDE.md lists Spring Retry; Spring Framework 7 now ships the same thing in core
+  (`RetryTemplate`, `@Retryable`, `@ConcurrencyLimit`, switched on with `@EnableResilientMethods`), and Spring AI 2 already uses it.
+  Reach for that if app-level retry is ever needed.
+- **Streaming** retries only cover opening the stream. A failure in the middle ends it with the in-band `error` event (6.3).
+- **Retrying is not a fallback.** Switching to the local model when the cloud is down, or failing fast after repeated errors, is a
+  circuit breaker's job (Resilience4j); not needed yet.
+- **Tools (U11)** change the picture: retrying a call that already ran a side-effecting tool can run it twice.
+
+**Tests.** `ChatModelSelectionTest` now switches through `app.ai.chat-provider` and the profiles: default → Anthropic, `local` →
+Ollama, `local,anthropic` → Anthropic, a typo and a missing value fail on the property. It also calls an Ollama address where
+nothing listens and checks that the failure comes back in seconds (about 8 s on Windows, where a refused connection itself
+takes a moment), not minutes.

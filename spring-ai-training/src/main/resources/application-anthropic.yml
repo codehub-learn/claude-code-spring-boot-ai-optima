@@ -1,0 +1,7 @@
+# Cloud model profile (unit 7.4): the chat model is Anthropic Claude. Needs ANTHROPIC_API_KEY in the environment.
+# Anthropic is also the default without any profile; this profile exists to win over `local` (which picks Ollama) when both are
+# active: spring.profiles.active=local,anthropic. The connection, retry and timeout settings live in application.yml.
+
+app:
+  ai:
+    chat-provider: anthropic
