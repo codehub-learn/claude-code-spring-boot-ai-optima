@@ -102,6 +102,13 @@
 			<artifactId>spring-ai-vector-store-advisor</artifactId>
 		</dependency>
 
+		<!-- MarkdownDocumentReader (unit 10.2): parses Markdown (commonmark) into one Document per heading section, the structure-aware
+		     chunking strategy compared against TokenTextSplitter (Spring AI core) and whole documents. -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-markdown-document-reader</artifactId>
+		</dependency>
+
 		<!-- Spring Data JDBC (unit 9.2): the conversation registry, a single-table aggregate. Plain JDBC mapping is enough for one table;
 		     no JPA / Hibernate in this module. -->
 		<dependency>

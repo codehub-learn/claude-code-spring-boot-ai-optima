@@ -526,3 +526,12 @@ Patterns captured after user corrections. Review at session start.
   a checksum change and `flyway:validate` failed ("Migration checksum mismatch for migration version 2"). Rule: run
   `flyway:migrate` only after the migration's final formatting, and leave already-applied `V*` files out of `reformat_file`. After
   any reformat that touched SQL, run `flyway:validate` and read the file back.
+
+## Verify with the compose stack down: tests can hide on the local database (U10.2)
+
+- `ChatModelSelectionTest` starts the application with `SpringApplicationBuilder`, outside the Spring test context, so the
+  Testcontainers `@ServiceConnection` never applies. When 9.2 put a datasource on the classpath, that test silently connected
+  to the compose Oracle (`application.yml`'s localhost:1521) and stayed green for two units, until a verify ran with compose
+  stopped (`ORA-12541`). Rule: a test that builds its own context passes the Testcontainers connection explicitly
+  (`--spring.datasource.url=` + `getJdbcUrl()`, username, password). After adding infrastructure, run `verify` once with
+  `docker compose down` to prove the tests are self-contained.

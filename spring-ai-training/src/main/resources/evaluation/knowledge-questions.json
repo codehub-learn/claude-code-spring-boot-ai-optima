@@ -1,0 +1,21 @@
+[
+  {"question": "How long do I have to withdraw from a purchase after it is delivered?", "expectedRef": "terms-of-sale", "answer": "14 days from delivery"},
+  {"question": "Is there an extra fee for paying cash on delivery?", "expectedRef": "terms-of-sale", "answer": "a fee of 2 EUR"},
+  {"question": "How many monthly instalments are interest-free?", "expectedRef": "terms-of-sale", "answer": "Up to 12 instalments are interest-free"},
+  {"question": "What happens to my order if my bank transfer does not arrive?", "expectedRef": "terms-of-sale", "answer": "held for 3 working days"},
+  {"question": "My laptop won't turn on at all, what should I try first?", "expectedRef": "product-care-guide", "answer": "wait 10 minutes"},
+  {"question": "Can I go swimming with the Aurora Fold 5?", "expectedRef": "product-care-guide", "answer": "IPX4"},
+  {"question": "How do I put the Studio 3 headphones into pairing mode?", "expectedRef": "product-care-guide", "answer": "7 seconds"},
+  {"question": "How many dead pixels does a monitor need to get replaced?", "expectedRef": "product-care-guide", "answer": "3 or more dead pixels"},
+  {"question": "Why does my laptop charge slowly through the USB-C dock?", "expectedRef": "product-care-guide", "answer": "at least 100 W"},
+  {"question": "Do you accept a phone with a cracked screen for trade-in?", "expectedRef": "trade-in-and-recycling", "answer": "Faulty devices are still accepted"},
+  {"question": "Is the trade-in value paid out in cash?", "expectedRef": "trade-in-and-recycling", "answer": "not as cash"},
+  {"question": "Can I mail you a swollen battery for recycling?", "expectedRef": "trade-in-and-recycling", "answer": "must not be sent by post"},
+  {"question": "How many users can one business account have?", "expectedRef": "business-accounts", "answer": "up to 50 users"},
+  {"question": "When can my company start paying on credit?", "expectedRef": "business-accounts", "answer": "After 3 months of trading"},
+  {"question": "Πόσο κοστίζει η express αποστολή;", "expectedRef": "shipping", "answer": "9.90 EUR"},
+  {"question": "Μπορώ να επιστρέψω ακουστικά που έχω ανοίξει;", "expectedRef": "returns-policy", "answer": "only be returned unopened"},
+  {"question": "Which monitor is an ultrawide?", "expectedRef": "MON-0004", "answer": "ultrawide"},
+  {"question": "Do you sell gaming consoles?", "expectedRef": null, "answer": null},
+  {"question": "What time do your stores open on Sundays?", "expectedRef": null, "answer": null}
+]

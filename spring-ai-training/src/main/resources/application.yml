@@ -188,3 +188,9 @@ app:
       # Unit 10.1 (knowledge.KnowledgeProperties): the schema holding spring-boot-training's catalog tables, read-only (grant in
       # compose/oracle-startdb/02_ai_training_catalog_read.sql).
       catalog-schema: training
+      chunking:
+        # Unit 10.2: ingestion stores the bundled documents under every strategy (whole | token | markdown); this one answers.
+        # Picked from POST /api/v1/knowledge/evaluations (see the README's 10.2 table).
+        active: markdown
+        # TokenTextSplitter's target size in tokens. Its default (800) would leave every bundled document in one piece.
+        token-chunk-size: 200

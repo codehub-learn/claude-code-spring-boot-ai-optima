@@ -1,6 +1,5 @@
 package gr.codelearn.springbootai.ai.knowledge;
 
-import org.springframework.ai.document.Document;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.io.support.ResourcePatternResolver;
@@ -13,15 +12,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
- * Unit 10.1: the store's policy documents ({@code classpath:knowledge/*.md}: returns, warranty, shipping, a laptop buying guide), one
- * {@link Document} per file, whole. They are short enough to embed in one piece; splitting longer text into chunks is 10.2.
- *
- * <p>Same shape as the catalog documents: the text starts with the citation tag {@code [doc:name]} (the file name without
- * {@code .md}), the title is the file's first {@code #} heading, the id is derived from the name.
+ * Unit 10.1: the store's policy documents, {@code classpath:knowledge/*.md}. Unit 10.2: read only; cutting them into chunks is
+ * {@link DocumentChunker}'s job, once per {@link ChunkingStrategy}. Four are short (returns, warranty, shipping, a laptop buying guide),
+ * four are long enough for chunking to matter (terms of sale, a care and troubleshooting guide, trade-in, business accounts).
  */
 @Component
 class BundledDocumentReader {
@@ -36,18 +32,18 @@ class BundledDocumentReader {
 		this.resolver = ResourcePatternUtils.getResourcePatternResolver(resourceLoader);
 	}
 
-	List<Document> read() {
+	List<BundledDocument> read() {
 		try {
 			return Arrays.stream(resolver.getResources(LOCATION))
 						 .sorted(Comparator.comparing(resource -> Objects.requireNonNullElse(resource.getFilename(), "")))
-						 .map(BundledDocumentReader::toDocument)
+						 .map(BundledDocumentReader::toBundledDocument)
 						 .toList();
 		} catch (IOException ex) {
 			throw new UncheckedIOException("Cannot list " + LOCATION, ex);
 		}
 	}
 
-	private static Document toDocument(final Resource resource) {
+	private static BundledDocument toBundledDocument(final Resource resource) {
 		final String filename = Objects.requireNonNull(resource.getFilename());
 		final String name = filename.substring(0, filename.length() - ".md".length());
 		final String content;
@@ -57,10 +53,16 @@ class BundledDocumentReader {
 			throw new UncheckedIOException("Cannot read " + filename, ex);
 		}
 		final String title = content.lines().filter(line -> line.startsWith("# ")).findFirst().map(line -> line.substring(2)).orElse(name);
-		return Document.builder()
-					   .id(CatalogDocumentReader.idFor(SOURCE, name))
-					   .text("[%s:%s] %s".formatted(SOURCE, name, content))
-					   .metadata(Map.of("source", SOURCE, "ref", name, "title", title))
-					   .build();
+		return new BundledDocument(name, title, content);
+	}
+
+	/**
+	 * One bundled Markdown file.
+	 *
+	 * @param name    the file name without {@code .md}: the {@code ref} in metadata and in the citation tag {@code [doc:name]}
+	 * @param title   the first {@code #} heading
+	 * @param content the Markdown text
+	 */
+	record BundledDocument(String name, String title, String content) {
 	}
 }

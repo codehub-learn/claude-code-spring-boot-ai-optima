@@ -41,6 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Unit 10.1 integration test: the whole RAG flow over HTTP, on the Testcontainers Oracle and its real vector table, with two stubs. The
  * {@link HashingEmbeddingModel} maps each word to one of 1024 dimensions (texts that share words are close, no model needed); the
  * {@link RecordingChatModel} records the prompt and answers "Answer". Catalog rows come from the {@code knowledge-catalog.sql} fixture.
+ * Unit 10.2: every chunking strategy side by side, the active-strategy filter, and the evaluation endpoint (its numbers only mean something
+ * with the real embedding model: see the README).
  */
 @AutoConfigureMockMvc
 @Sql("/sql/knowledge-catalog.sql")
@@ -61,42 +63,64 @@ class KnowledgeApiIT extends AbstractOracleIntegrationTest {
 	}
 
 	@Test
-	void ingestionEmbedsTheCatalogWithoutDemoRowsAndTheBundledDocuments() {
+	void ingestionEmbedsTheCatalogOnceAndEveryDocumentUnderEachStrategy() {
 		ingest().hasStatusOk().bodyJson().isLenientlyEqualTo("""
-															 {"catalogDocuments": 3, "bundledDocuments": 4, "totalDocuments": 7}""");
+															 {"catalogDocuments": 3, "bundledDocuments": 8, "chunks": {"whole": 8}}""");
 
-		assertThat(storedRefs()).containsExactlyInAnyOrder("LAP-0002", "LAP-0003", "AUD-0001", "laptop-buying-guide", "returns-policy",
-														   "shipping", "warranty");
+		assertThat(storedRefs("none")).containsExactlyInAnyOrder("LAP-0002", "LAP-0003", "AUD-0001");
+		assertThat(storedRefs("whole")).hasSize(8).contains("terms-of-sale", "warranty");
+		assertThat(storedRefs("token")).hasSizeGreaterThan(8);
+		assertThat(storedRefs("markdown")).hasSizeGreaterThan(storedRefs("token").size());
 	}
 
 	@Test
 	void ingestingTwiceReplacesInsteadOfDuplicating() {
 		ingest().hasStatusOk();
+		final int rows = storedRows();
+
 		ingest().hasStatusOk();
 
-		assertThat(storedRefs()).hasSize(7);
+		assertThat(storedRows()).isEqualTo(rows);
 	}
 
 	@Test
 	void anAnswerIsGeneratedFromTheRetrievedDocuments() {
 		ingest().hasStatusOk();
 
-		ask("Which workstation has a discrete GPU and 32 GB RAM?").hasStatusOk()
-																  .bodyJson()
-																  .extractingPath("$.sources[0].ref")
-																  .isEqualTo("LAP-0002");
+		ask("Which workstation has a discrete GPU and 32 GB RAM?").hasStatusOk().bodyJson().extractingPath("$.sources[0].ref").isEqualTo(
+				"LAP-0002");
 
 		// Query -> retrieval -> context -> generation: the model got the system prompt, then one user message built from the template
-		// with the retrieved document's text (tag included) inside <documents> and the question last.
+		// with the retrieved document's text (tag included) inside <documents> and the question last. ST writes line breaks as the
+		// platform's (\r\n on Windows), so compare with \n.
 		final List<Message> messages = chatModel.prompts().getLast().getInstructions();
 		assertThat(messages).extracting(Message::getMessageType).containsExactly(MessageType.SYSTEM, MessageType.USER);
-		// ST writes line breaks as the platform's (\r\n on Windows), so compare with \n.
-		assertThat(messages.getLast().getText().replace("\r\n", "\n")).contains("<documents>",
-		                                                                        "[catalog:LAP-0002] Latitude 16 Workstation. Category: " +
-																				"Laptops.")
-																	  .endsWith(
-				                                                              "Which workstation has a discrete GPU and 32 GB " +
-																			  "RAM?\n</question>");
+		final String userText = messages.getLast().getText().replace("\r\n", "\n");
+		assertThat(userText).contains("<documents>", "[catalog:LAP-0002] Latitude 16 Workstation. Category: Laptops.");
+		assertThat(userText).endsWith("Which workstation has a discrete GPU and 32 GB RAM?\n</question>");
+	}
+
+	@Test
+	void answersRetrieveOnlyTheActiveStrategysChunks() {
+		ingest().hasStatusOk();
+
+		// The active strategy is markdown (application.yml): every retrieved document chunk carries its section, whole documents and
+		// token chunks never do.
+		ask("How many users can one business account have?").hasStatusOk()
+															.bodyJson()
+															.extractingPath("$.sources[?(@.source == 'doc')].section")
+															.asArray()
+															.isNotEmpty()
+															.doesNotContainNull();
+	}
+
+	@Test
+	void theEvaluationReportsEveryStrategy() {
+		ingest().hasStatusOk();
+
+		assertThat(mvc.post().uri("/api/v1/knowledge/evaluations?top-k=3")).hasStatusOk().bodyJson().isLenientlyEqualTo("""
+																														{"topK": 3, "questions": 19,
+																														 "strategies": [{"strategy": "whole", "chunks": 8}, {"strategy": "token"}, {"strategy": "markdown"}]}""");
 	}
 
 	@Test
@@ -122,11 +146,18 @@ class KnowledgeApiIT extends AbstractOracleIntegrationTest {
 		return assertThat(mvc.post().uri("/api/v1/knowledge/answers").contentType(MediaType.APPLICATION_JSON).content("""
 																													  {"question": "%s"}"""
 																															  .formatted(
-						                                                                                                              question)));
+																																	  question)));
 	}
 
-	private List<String> storedRefs() {
-		return jdbcClient.sql("select json_value(metadata, '$.ref') from knowledge_vector").query(String.class).list();
+	private List<String> storedRefs(final String chunking) {
+		return jdbcClient.sql("select json_value(metadata, '$.ref') from knowledge_vector where json_value(metadata, '$.chunking') = ?")
+						 .param(chunking)
+						 .query(String.class)
+						 .list();
+	}
+
+	private int storedRows() {
+		return jdbcClient.sql("select count(*) from knowledge_vector").query(Integer.class).single();
 	}
 
 	@TestConfiguration

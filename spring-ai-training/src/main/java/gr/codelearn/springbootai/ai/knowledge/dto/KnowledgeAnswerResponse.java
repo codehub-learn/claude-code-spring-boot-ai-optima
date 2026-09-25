@@ -25,12 +25,14 @@ public record KnowledgeAnswerResponse(
 	 * @param source     {@code catalog} (a product row) or {@code doc} (a bundled document)
 	 * @param ref        the SKU or the document name; with the source, the tag the answer cites
 	 * @param title      the product name or the document's heading
+	 * @param section    unit 10.2: the Markdown section the chunk came from ({@code null} for other chunks and catalog rows)
 	 * @param similarity 1 - cosine distance to the question, 1 = same direction ({@code null} if the store did not say)
 	 */
 	public record Source(
 			@Schema(example = "catalog") String source,
 			@Schema(example = "LAP-0002") String ref,
 			@Schema(example = "Latitude 16 Workstation") String title,
+			@Schema(example = "Payment") @Nullable String section,
 			@Schema(example = "0.61") @Nullable Double similarity) {
 	}
 

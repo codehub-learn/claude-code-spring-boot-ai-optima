@@ -1307,3 +1307,104 @@ The restart re-runs the grant: `02_ai_training_catalog_read.sql` skips it while 
 	- the prompt's shape: system prompt, then context with the tag, question last
 	- top-k bounds the context
 	- an empty store still answers, with no sources
+
+### 10.2 Chunking strategies
+
+**Why chunk at all.** 10.1 embedded each document whole. That works for a 150-word warranty page. For a long document, one
+vector has to stand for every topic in it. The question "cash on delivery fee?" is then compared with an average of payments,
+cancellations, gift cards and disputes, and the match gets weaker. Chunking cuts documents into smaller pieces, each embedded
+and retrieved on its own. The price is fragmentation: a chunk can lose the context that said what it is about.
+
+The corpus grew with four longer documents (`src/main/resources/knowledge/`): terms of sale (967 words), a product care and
+troubleshooting guide (1,131), trade-in and recycling (705) and business accounts (699). Each has 8 to 15 sections, and each
+answer sits in one section. The four 10.1 documents stay too.
+
+**Three strategies, ingested side by side** (`ChunkingStrategy`, `DocumentChunker`):
+
+| Strategy   | How                                                                   | Chunks (8 documents) |
+|------------|-----------------------------------------------------------------------|----------------------|
+| `whole`    | one chunk per document (the 10.1 baseline)                            | 8                    |
+| `token`    | Spring AI `TokenTextSplitter`, 200 tokens, backing up to the last sentence end | 33                   |
+| `markdown` | Spring AI `MarkdownDocumentReader`, one chunk per heading section      | 50                   |
+
+Every bundled document is stored once per strategy, with `chunking` in its metadata. Catalog rows are one sentence each, so
+they are stored once as `chunking: none` and every strategy searches them too. The answers endpoint retrieves with the filter
+`chunking in ['none', '<active>']`, passed per call as `QuestionAnswerAdvisor.FILTER_EXPRESSION`. So switching strategies
+(`app.ai.knowledge.chunking.active`) needs no re-ingestion. `TokenTextSplitter`'s default of 800 tokens would have left every
+document here whole (pinned in `ChunkingTest`), which is why the size is set to 200 (`token-chunk-size`).
+
+**Every chunk gets a contextual header.** The model only sees a chunk's text (10.1), and neither splitter keeps context:
+`TokenTextSplitter` leaves the `[doc:name]` tag on the first chunk only, and `MarkdownDocumentReader` drops the heading from
+the text altogether (it goes to metadata as `title`). So `DocumentChunker` rebuilds each chunk:
+
+```text
+[doc:terms-of-sale] Terms of sale > Payment: We accept Visa, Mastercard ... Cash on delivery is available for orders up to 500 EUR, with a fee of 2 EUR. ...
+[doc:terms-of-sale] Terms of sale (part 3 of 6): ... held for 3 working days. If the payment has not arrived by then ...
+```
+
+The header is embedded too. A chunk that never names its topic ("It is held for 3 working days") still matches a question
+about bank transfers, and the model can cite it.
+
+**Measuring it: `POST /api/v1/knowledge/evaluations?top-k=4`** (`KnowledgeEvaluationService`) runs the 19 questions in
+`evaluation/knowledge-questions.json` through retrieval only, with no chat model, once per strategy. There are 17 answerable
+ones (2 in Greek, 1 catalog question) and 2 the store can't answer. A retrieved chunk is a **hit** when it comes from the
+expected document *and* contains the answer phrase ("a fee of 2 EUR"). That judges a whole document and a small chunk alike:
+the answer has to be in what the model would get.
+
+Live (`qwen3-embedding:0.6b`, after ingesting 24 catalog rows and the 8 documents):
+
+| top-k 4    | hit@1 | hit@4 | MRR   | mean / lowest hit similarity | highest unanswerable similarity | context tokens per question |
+|------------|-------|-------|-------|------------------------------|---------------------------------|-----------------------------|
+| `whole`    | 0.53  | 0.76  | 0.65  | 0.53 / 0.40                  | 0.37                            | 1,370                       |
+| `token`    | 0.82  | 1.00  | 0.90  | 0.57 / 0.44                  | 0.37                            | 565                         |
+| `markdown` | 0.82  | 1.00  | **0.91** | **0.64** / 0.39           | **0.35**                        | **384**                     |
+
+At top-k 2, `markdown` still had every answer (hit@2 1.00, 219 tokens); `token` dropped to 0.94 and `whole` stayed at 0.76.
+At top-k 8, `whole` reached only 0.82 while costing 1,800 tokens.
+
+What the numbers show:
+- **Whole documents lose on long text.** Four questions missed entirely at top-k 4: three from the product care guide
+  (swimming with the Fold 5, Studio 3 pairing, dead pixels) and the instalments rule from the terms of sale. The 1,131-word
+  guide's single vector sat below catalog rows that merely mentioned the product. Whole documents also send three to four
+  times the tokens.
+- **Both chunkers find everything within 4.** `markdown` ranks the answer slightly earlier, scores it higher (0.64 against
+  0.57), and costs the least, because sections are small and self-contained.
+- **Size isn't structure.** A 200-token window cut "withdraw within 14 days" away from its heading, so it ranked 4th. The
+  "Cancelling an order" section ranked 1st. But `token` did better on the Greek returns question (1st vs 2nd): one
+  fixed-size piece held both halves of the rule.
+- **The threshold question from 10.1** has an answer for `markdown` on this set: every first hit scored at least 0.39 and no
+  unanswerable question passed 0.35. A threshold around 0.37 would have dropped the noise and kept every answer. That's a
+  0.04 margin measured on 19 questions, so treat it as a starting point, not a setting.
+
+`app.ai.knowledge.chunking.active` is therefore **`markdown`**.
+
+**Live answers** with `markdown`:
+- "Cash on delivery fee, and up to what amount?" → 2 EUR, up to 500 EUR. It retrieved "Terms of sale > Payment" (0.60) first,
+  with 864 prompt tokens.
+- Studio 3 pairing → hold the power button for 7 seconds. It retrieved "Product care > Pairing problems" (0.74).
+- Business credit → after 3 months and 3 paid orders, within 30 days. It merged two rules about "15 days overdue" into one.
+
+The first run of the cash question ended with "[Catalog:LAP-0002]": the model had copied the *example* tag from the
+instructions. The template now describes the tag format without an example, and the rerun cited
+`[doc:terms-of-sale] ... > Payment`.
+
+**Pitfalls (Spring AI 2.0.1):**
+
+| Pitfall                                                                      | Here                                                     |
+|------------------------------------------------------------------------------|----------------------------------------------------------|
+| `TokenTextSplitter` defaults to 800 tokens: short and medium documents stay whole | `token-chunk-size: 200`                            |
+| Only the first token chunk keeps a tag written at the top of the document    | a header added to every chunk                            |
+| `MarkdownDocumentReader` puts the heading in metadata only, not in the text  | `DocumentChunker` writes it into the header              |
+| `MarkdownDocumentReader` joins paragraphs with no separator: "dispatch.Bank transfers" | pinned in `ChunkingTest`; embeddings cope, the model sees glued sentences |
+| Splitters give chunks random ids, so re-ingesting would duplicate            | ids from document + strategy + position                  |
+| `TextSplitter` logs `Splitting up document into N chunks.` at INFO for every document | noise for 10.3's logging                         |
+| An example tag in the prompt gets copied as a citation by a small model      | the template describes the tag, no example               |
+
+**Tests.**
+- `ChunkingTest` (8): the splitter's size and context loss, the 800-token default, the reader's heading in metadata only and
+  glued paragraphs, the headers, stable ids per strategy, and the long documents splitting.
+- `KnowledgeEvaluationTest` (4): what counts as a hit.
+- `KnowledgeApiIT` (7): every strategy stored with the catalog stored once, re-ingestion stable, answers retrieving only
+  `markdown` chunks, the evaluation response.
+- `KnowledgeControllerTest` (8): the new response shapes and `top-k` validation.
+- `KnowledgeDocumentsTest` (3).

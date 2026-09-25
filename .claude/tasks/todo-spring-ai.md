@@ -92,7 +92,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 - [x] **10.1 RAG pipeline overview** — an end-to-end query → retrieval → context → generation
   slice using `QuestionAnswerAdvisor`, documented as the reference flow.
-- [ ] **10.2 Chunking strategies** — a document ingestion step (`TokenTextSplitter` or similar),
+- [x] **10.2 Chunking strategies** — a document ingestion step (`TokenTextSplitter` or similar),
   comparing at least two chunking configs and their effect on retrieval quality.
 - [ ] **10.3 Logging** — structured logging around the RAG pipeline stages (retrieval hits, chunk
   count) at DEBUG/local only, honoring the "no full prompts/completions at INFO outside local"
@@ -555,3 +555,42 @@ own module — no code here should be required for the Spring Boot units to buil
 - README: new U10 heading, 10.1 section (the two phases, the four pieces, model choice, ingestion, text vs metadata, live
   table and what it shows, pitfalls, statuses, setup, tests).
 - Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 128 unit/slice + 35 IT, 0 failures).
+
+### 10.2 Chunking strategies (done)
+
+- User decisions: **add long documents** (the user asked for more than two; four added), compare **whole vs TokenTextSplitter
+  vs Markdown sections**, measure with an **evaluation endpoint** (retrieval only).
+- Corpus: `terms-of-sale.md` (967 words), `product-care-guide.md` (1,131), `trade-in-and-recycling.md` (705),
+  `business-accounts.md` (699), 8-15 sections each, beside the four 10.1 documents. Shorter than the 1,500-2,000 words planned;
+  enough for chunking to matter (33 token chunks, 50 sections).
+- Pom: `spring-ai-markdown-document-reader`. `app.ai.knowledge.chunking.active: markdown`, `token-chunk-size: 200`
+  (`KnowledgeProperties.Chunking`).
+- `knowledge`: `ChunkingStrategy` (`whole` / `token` / `markdown`, key + filter expression), `DocumentChunker` (Spring AI's
+  splitter/reader, then a contextual header per chunk `[doc:name] Title > Section:` / `(part i of n):`, stable ids per document +
+  strategy + index, metadata `chunking`, `section`, `chunk_index`, `chunk_count`), `BundledDocumentReader` now returns
+  `BundledDocument` records, catalog rows marked `chunking: none`. Ingestion stores every strategy side by side;
+  `KnowledgeService` filters per call (`QuestionAnswerAdvisor.FILTER_EXPRESSION`); sources carry `section`.
+  `KnowledgeEvaluationService` + `POST /api/v1/knowledge/evaluations?top-k=`: 19 questions
+  (`evaluation/knowledge-questions.json`, 2 Greek, 1 catalog, 2 unanswerable), hit = expected ref + answer phrase in the chunk;
+  hit@1, hit@k, MRR, mean/min hit similarity, max unanswerable similarity, context tokens (JTokkit). Ingestion response now
+  has `chunks` per strategy and `totalRows`.
+- Findings (2.0.1, pinned in `ChunkingTest`): `TokenTextSplitter` defaults to 800 tokens (documents here stay whole), keeps a
+  top-of-document tag on the first chunk only, random chunk ids, INFO log per split document; `MarkdownDocumentReader` puts the
+  heading in metadata only and glues paragraphs ("dispatch.Bank"). A small model copied the prompt's *example* citation tag
+  (`[Catalog:LAP-0002]`) into an answer; the template now describes the tag without an example.
+- Live (Ollama, port 8081, `provider=OLLAMA`): ingestion 24 + 8 → whole 8 / token 33 / markdown 50 chunks, 115 rows, 20 s.
+  Evaluation top-k 4: whole hit@1 .53 hit@4 .76 MRR .65 1,370 tokens; token .82 / 1.00 / .90, 565; markdown .82 / 1.00 / .91,
+  384, mean hit similarity .64, min .39, highest unanswerable .35. Top-k 2: markdown still 1.00 (219 tokens). Whole missed 4
+  questions (3 care-guide, instalments). Markdown chosen as active. Answers with markdown: cash on delivery (Payment section,
+  .60), Studio 3 pairing (.74), business credit (merged two "15 days" rules). Not run: Anthropic.
+- Tests: `ChunkingTest` (8), `KnowledgeEvaluationTest` (4), `KnowledgeApiIT` (7), `KnowledgeControllerTest` (8),
+  `KnowledgeDocumentsTest` (3).
+- README: 10.2 section (why chunk, corpus, strategies, contextual headers, evaluation method and results, what they show, the
+  threshold margin, pitfalls, tests).
+- Fix found by the verify run (a 9.2 regression, not 10.2): `ChatModelSelectionTest` builds the application itself, so
+  `@ServiceConnection` never applied and since 9.2 it had been using the compose Oracle on localhost:1521. It passed only while
+  that was up; with compose stopped, 7 errors (`ORA-12541`). It now passes the shared Testcontainers Oracle as datasource
+  properties. See lessons.md.
+- Verified: `./mvnw -pl spring-ai-training verify` → 142 unit/slice + 37 IT, 0 failures. spring-boot-training (unchanged) passed
+  in the preceding full-reactor run (75 + 66). The first full run was stopped for low memory; a second hit a transient compile
+  error while the IDE was saving `KnowledgeEvaluationResponse.java`.

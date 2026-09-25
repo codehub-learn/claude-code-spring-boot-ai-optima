@@ -35,6 +35,8 @@ import java.util.Objects;
  * </ol>
  *
  * <p>Nothing in this class searches or builds the context: it adds the advisor for this call only (see {@code config.ai.RagConfig}).
+ * Unit 10.2: with a filter, passed per call ({@link QuestionAnswerAdvisor#FILTER_EXPRESSION}), so retrieval only sees the active chunking
+ * strategy's chunks and the catalog rows ({@code app.ai.knowledge.chunking.active}).
  */
 @Service
 class KnowledgeService {
@@ -45,10 +47,13 @@ class KnowledgeService {
 
 	private final ChatClient chatClient;
 	private final QuestionAnswerAdvisor questionAnswerAdvisor;
+	private final KnowledgeProperties properties;
 
-	KnowledgeService(final ChatClient chatClient, final QuestionAnswerAdvisor questionAnswerAdvisor) {
+	KnowledgeService(final ChatClient chatClient, final QuestionAnswerAdvisor questionAnswerAdvisor,
+					 final KnowledgeProperties properties) {
 		this.chatClient = chatClient;
 		this.questionAnswerAdvisor = questionAnswerAdvisor;
+		this.properties = properties;
 	}
 
 	KnowledgeAnswerResponse answer(final KnowledgeAnswerRequest request) {
@@ -57,7 +62,9 @@ class KnowledgeService {
 			response = chatClient.prompt()
 								 .system(SystemPromptParams::fill)
 								 .user(request.question())
-								 .advisors(questionAnswerAdvisor)
+								 .advisors(advisors -> advisors.advisors(questionAnswerAdvisor)
+															   .param(QuestionAnswerAdvisor.FILTER_EXPRESSION,
+																	  properties.chunking().active().filterExpression()))
 								 .call()
 								 .chatResponse();
 		} catch (RuntimeException ex) {
@@ -83,14 +90,16 @@ class KnowledgeService {
 
 	private static Source toSource(final Document document) {
 		final Map<String, Object> metadata = document.getMetadata();
-		return new Source(text(metadata.get("source")), text(metadata.get("ref")), text(metadata.get("title")), document.getScore());
+		final Object section = metadata.get("section");
+		return new Source(text(metadata.get("source")), text(metadata.get("ref")), text(metadata.get("title")),
+						  section == null ? null : text(section), document.getScore());
 	}
 
 	/**
 	 * A metadata value as plain text. OracleVectorStore (2.0.1) hands back the driver's JSON values ({@code OracleJsonString}), whose
 	 * {@code toString()} is the JSON text: {@code "LAP-0002"} with the quotes. Parsed as JSON, it is the string again.
 	 */
-	private static String text(final @Nullable Object value) {
+	static String text(final @Nullable Object value) {
 		if (value == null || value instanceof String) {
 			return Objects.requireNonNullElse((String) value, "");
 		}

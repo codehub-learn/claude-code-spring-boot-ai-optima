@@ -26,6 +26,12 @@ class CatalogDocumentReader {
 
 	static final String SOURCE = "catalog";
 
+	/**
+	 * Unit 10.2: the {@code chunking} metadata of a catalog row. A product is one short sentence and is never split, so every chunking
+	 * strategy searches the same catalog rows.
+	 */
+	static final String NOT_CHUNKED = "none";
+
 	private final JdbcClient jdbcClient;
 	private final KnowledgeProperties properties;
 
@@ -50,12 +56,12 @@ class CatalogDocumentReader {
 	static Document toDocument(final String sku, final String name, final String description, final BigDecimal price,
 							   final String category) {
 		final String text = "[%s:%s] %s. Category: %s. Price: %s EUR. %s".formatted(SOURCE, sku, name, category,
-		                                                                            price.setScale(2, RoundingMode.HALF_UP).toPlainString(),
+																					price.setScale(2, RoundingMode.HALF_UP).toPlainString(),
 																					description);
 		return Document.builder()
 					   .id(idFor(SOURCE, sku))
 					   .text(text)
-					   .metadata(Map.of("source", SOURCE, "ref", sku, "title", name, "category", category))
+					   .metadata(Map.of("source", SOURCE, "ref", sku, "title", name, "category", category, "chunking", NOT_CHUNKED))
 					   .build();
 	}
 
