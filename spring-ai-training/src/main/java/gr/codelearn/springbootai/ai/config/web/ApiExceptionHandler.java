@@ -2,7 +2,6 @@ package gr.codelearn.springbootai.ai.config.web;
 
 import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
 import gr.codelearn.springbootai.ai.common.InvalidModelOutputException;
-import gr.codelearn.springbootai.ai.conversation.ConversationLimitException;
 import gr.codelearn.springbootai.ai.conversation.ConversationNotFoundException;
 
 import org.slf4j.Logger;
@@ -51,11 +50,6 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(ConversationNotFoundException.class)
 	ProblemDetail handleConversationNotFound(final ConversationNotFoundException ex) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
-	}
-
-	@ExceptionHandler(ConversationLimitException.class)
-	ProblemDetail handleConversationLimit(final ConversationLimitException ex) {
-		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
 	}
 
 	@ExceptionHandler(InvalidModelOutputException.class)

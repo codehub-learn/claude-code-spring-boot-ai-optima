@@ -8,6 +8,9 @@ spring:
   devtools:
     restart:
       enabled: false
+  flyway:
+    # Unit 9.2: Boot migrates the per-run Testcontainers database on context start; `flyway:migrate` can't reach it.
+    enabled: true
   ai:
     anthropic:
       # Dummy key so tests never depend on (or pick up) a developer's real ANTHROPIC_API_KEY. They stub the ChatModel anyway.

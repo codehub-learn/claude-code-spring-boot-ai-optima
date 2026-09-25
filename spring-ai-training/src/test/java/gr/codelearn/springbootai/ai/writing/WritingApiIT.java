@@ -1,5 +1,7 @@
 package gr.codelearn.springbootai.ai.writing;
 
+import gr.codelearn.springbootai.ai.support.AbstractOracleIntegrationTest;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -12,14 +14,12 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
 import java.time.LocalDate;
@@ -33,10 +33,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * what actually reaches the model: the application's system prompt first, then the use case's rendered template as the user message. Plus
  * the failure path (502).
  */
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
-class WritingApiIT {
+class WritingApiIT extends AbstractOracleIntegrationTest {
 
 	@Autowired
 	private MockMvcTester mvc;
@@ -118,9 +116,9 @@ class WritingApiIT {
 				throw new IllegalStateException("simulated provider outage");
 			}
 			final ChatResponseMetadata metadata = ChatResponseMetadata.builder()
-			                                                          .model("stub-model")
-			                                                          .usage(new DefaultUsage(90, 10))
-			                                                          .build();
+																	  .model("stub-model")
+																	  .usage(new DefaultUsage(90, 10))
+																	  .build();
 			return new ChatResponse(List.of(new Generation(new AssistantMessage("A short text."))), metadata);
 		}
 

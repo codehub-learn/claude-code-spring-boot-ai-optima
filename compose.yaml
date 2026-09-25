@@ -29,6 +29,9 @@ services:
       # Empty for now; kept for later seed data or extra grants. (Every-startup scripts would live in
       # /container-entrypoint-startdb.d.)
       - ./compose/oracle-init:/container-entrypoint-initdb.d
+      # Every-startup hook: creates spring-ai-training's own schema user, ai_training (unit 9.2), idempotently. Every startup, not
+      # first boot, so an existing oracle-data volume gets the user too.
+      - ./compose/oracle-startdb:/container-entrypoint-startdb.d
     networks:
       - db-network
     healthcheck:

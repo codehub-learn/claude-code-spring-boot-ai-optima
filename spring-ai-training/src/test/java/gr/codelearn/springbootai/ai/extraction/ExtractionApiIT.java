@@ -1,5 +1,7 @@
 package gr.codelearn.springbootai.ai.extraction;
 
+import gr.codelearn.springbootai.ai.support.AbstractOracleIntegrationTest;
+
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,14 +16,12 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.StructuredOutputChatOptions;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
 import java.util.ArrayDeque;
@@ -36,10 +36,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * structured output. It checks the whole path: the schema in the prompt or in the options, the repair round trip, Jakarta rules, and the
  * 502s when the output stays unusable.
  */
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
-class ExtractionApiIT {
+class ExtractionApiIT extends AbstractOracleIntegrationTest {
 
 	private static final String VALID = """
 										{"name": "Aurora X1", "category": "AUDIO", "price": 129.90, "currency": "EUR",

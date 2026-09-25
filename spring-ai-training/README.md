@@ -7,6 +7,8 @@ runnable, tested code plus notes here.
 Run it:
 
 ```bash
+docker compose up -d oracle                        # since 9.2 the module keeps chat memory in Oracle
+./mvnw -pl spring-ai-training flyway:migrate       # once, and after every new migration
 ./mvnw -pl spring-ai-training spring-boot:run
 ```
 
@@ -1005,3 +1007,135 @@ Prompt tokens: 170, 250, 282. Each turn pays again for every earlier one, which 
 **Tests.** `ConversationStoreTest` (2: find / delete, the bound); `ConversationControllerTest` (10, `@WebMvcTest`: 201 +
 `Location`, 200, 204, 400 for a blank message and a malformed id, 404, 409, 502); `ConversationApiIT` (6: turn 2's prompt
 carries turn 1, a stateless call and another conversation see no history, a failed turn isn't stored, the turn limit, delete).
+
+### 9.2 Memory lifecycle
+
+Same `/conversations` API as 9.1. What's different is underneath: the hand-rolled store is gone, and Spring AI's chat memory
+keeps the history in Oracle.
+
+**Three layers, each replaceable on its own** (`config.ai.ChatMemoryConfig`):
+
+| Layer                  | Class here                                           | Decides                                                              |
+|------------------------|------------------------------------------------------|----------------------------------------------------------------------|
+| `ChatMemoryRepository` | `JdbcChatMemoryRepository` (JDBC starter autoconfig) | **where** messages live: table `spring_ai_chat_memory`, in Oracle    |
+| `ChatMemory`           | `MessageWindowChatMemory`                            | **which** messages are kept: the last `app.ai.memory.max-messages`   |
+| `Advisor`              | `MessageChatMemoryAdvisor`                           | **when** memory is read and written: around each call                |
+
+A turn (`ConversationService.send`) no longer handles history at all:
+
+```java
+chatClient.prompt()
+		.system(SystemPromptParams::fill)
+		.user(content)
+		.advisors(a -> a.advisors(chatMemoryAdvisor).param(ChatMemory.CONVERSATION_ID, conversationId))
+		.call()
+		.chatResponse();
+```
+
+The advisor loads the remembered messages and puts them before the new one. It saves the user message **before** the call and
+the reply after it. The system prompt goes out on every call but is never stored: it belongs to the application, not to the
+conversation.
+
+The memory advisor is **not** a default advisor on the central `ChatClient`. It needs a conversation id on every call, and it
+fails without one ("conversationId cannot be null"). The stateless endpoints don't have an id to give it. So it's a bean,
+added per call. Its order (`DEFAULT_CHAT_MEMORY_PRECEDENCE_ORDER`) puts it outside `SimpleLoggerAdvisor` and
+`ThinkingBlocksAdvisor`. That way the debug log shows the prompt with the history in it, and memory stores the answer, never a
+thinking block.
+
+**Eviction is by count, never by age.** `MessageWindowChatMemory` keeps the last N messages and deletes the rest when it
+saves (`app.ai.memory.max-messages`, default 20, which is 10 turns). Spring AI's own autoconfig hard-codes 20 and has no
+property for it, so `ChatMemoryConfig` builds the window from the validated `ChatMemoryProperties`. Rules (pinned in
+`ChatMemoryTest`):
+
+- The kept window always **starts at a user message**. With an odd N the cut moves forward, so a reply is never kept without
+  its question (N = 3 keeps 2).
+- **System messages are never evicted.**
+- Evicted means **deleted from the table**, not hidden. `GET .../messages` shows the window, not the transcript. The reply's
+  `turn` still counts every turn (the `conversation.turns` column).
+
+The prompt stops growing, so 9.1's 20-turn limit and 1,000-conversation cap (the two `409`s) are gone. The price is
+forgetting: whatever left the window is gone for the model too.
+
+**Where memory lives, and for how long:**
+
+| Repository                               | Survives restart | Shared between instances | Cleanup                        |
+|------------------------------------------|------------------|--------------------------|--------------------------------|
+| `InMemoryChatMemoryRepository` (default) | no               | no                       | `clear(id)`, or the JVM ending |
+| `JdbcChatMemoryRepository` (**used**)    | yes              | yes                      | `clear(id)` / delete rows      |
+| Cassandra, Mongo, Neo4j, Redis starters  | yes              | yes                      | store-specific TTLs            |
+
+Each conversation's lifecycle is create (`POST`, a row in `conversation`), then turns (the window slides), then `DELETE`. The
+memory table's foreign key is `on delete cascade`, so deleting the conversation deletes its memory in one statement. Nothing
+expires on its own. An idle conversation stays until someone deletes it. If you need expiry, a scheduled job that deletes
+`conversation` rows by age is enough: the cascade takes care of the rest.
+
+**Schema and database.** The module now has a datasource: the compose Oracle, but in its **own schema user `ai_training`**.
+It doesn't share `training` with spring-boot-training, for two reasons: two Flyway histories can't share a schema, and a
+`flyway:clean` here must not drop the catalog. The user is created by `compose/oracle-startdb/01_ai_training_user.sql`
+(`CREATE USER IF NOT EXISTS`), which runs on **every** container start. The first-boot init hook would never run again on an
+existing volume. Flyway runs manually, as in spring-boot-training:
+
+```bash
+docker compose up -d oracle                        # recreates the container once, to mount the new startdb script (data kept)
+./mvnw -pl spring-ai-training flyway:migrate       # V1__create_chat_memory.sql
+```
+
+`V1` copies the library's `schema-oracle.sql` table (name and columns are fixed, because the dialect hard-codes them in its
+SQL) and adds the foreign key. `spring.ai.chat.memory.repository.jdbc.initialize-schema: never` turns the library's own schema
+initializer off, since Flyway owns the schema. The `conversation` registry is a Spring Data JDBC record aggregate. Its id is
+assigned by the application, so `@Version` (null means insert) tells a new row from an existing one.
+
+**Pitfalls found on the way:**
+
+| Pitfall                                                                  | What happens                                                                  | Here                                                                  |
+|--------------------------------------------------------------------------|-------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| The advisor saves the user message before the call                       | a failed call leaves a question without an answer; the next turn sends two user messages in a row | the service writes back the window from before the turn (`saveAll`) |
+| Oracle stores `''` as `NULL`; the memory table's `content` is `not null` | an empty reply fails to save: `ORA-01400 ... "CONTENT"`                       | same rollback, then `502`; pinned in `ConversationApiIT`              |
+| Tool-call messages                                                       | `JdbcChatMemoryRepository` drops them with a WARN (not persisted)             | no tools yet (U11)                                                    |
+| Anthropic thinking blocks                                                | only the text is stored, so replayed turns lose their thinking blocks         | accepted: Claude doesn't need them outside a tool loop                |
+| A datasource on the classpath                                            | every `@SpringBootTest` needs a database now                                  | `support.AbstractOracleIntegrationTest` (a shared Testcontainers Oracle) |
+
+**Concurrency.** Turns on one conversation still run one at a time: a `ReentrantLock` taken from 64 stripes by the id's hash.
+That's bounded, with nothing to clean up, and two conversations only occasionally share a lock. The lock lives in the JVM.
+Memory is now shared between instances, but locking is not: two instances could interleave turns on one conversation. No
+`@Transactional` and no connection is held while the model answers. Each repository call commits on its own.
+
+**Live** (`local` profile, `qwen3.5:4b`, port 8081, `--app.ai.memory.max-messages=4`):
+
+```text
+POST /conversations                                      -> 19ce6c33-...
+"My name is Maria."                      turn 1, 163 prompt tokens  "Hello Maria! ..."
+"I live in Thessaloniki."                turn 2, 197                "That's a lovely place, Maria! ..."
+"I work with Spring Boot."               turn 3, 260                "Great choice, Maria! ..."
+"What is my name and where do I live?"   turn 4, 298                "I don't have access to personal information ... (like your
+                                                                     location mentioned previously as Thessaloniki)"
+GET .../messages                                         -> 4 messages: turns 3 and 4 only
+
+(app stopped and started again)
+GET .../messages                                         -> the same 4 messages
+"Which framework do I work with?"        turn 5, 310                "You work with **Spring Boot**."
+DELETE                                                   -> 204, then GET -> 404; both tables empty
+```
+
+Turn 1 had left the window by turn 4. The model's own replies had echoed "Maria", and those were still in the window, but the
+small model ignored them. The counter kept counting (5) through the restart.
+
+| Status | When                                                                                                      |
+|--------|-----------------------------------------------------------------------------------------------------------|
+| 201    | a conversation was created (`Location` header)                                                            |
+| 200    | a turn's reply, or the remembered messages                                                                |
+| 204    | deleted, memory included                                                                                  |
+| 400    | a blank or oversized message, a malformed id, or an unsupported API version                               |
+| 404    | no such conversation (never created, or deleted; a restart no longer loses one)                           |
+| 502    | the chat model failed, or its reply could not be stored; the window is put back as it was before the turn |
+
+**Tests.**
+- `ChatMemoryTest` (6, no context): the window's eviction, its user-message start and kept system messages; the advisor's
+  prompt, what it stores, the half turn on failure, the required id.
+- `ConversationApiIT` (9, Testcontainers Oracle), replacing the 9.1 turn-limit case with:
+  - window eviction over 12 turns
+  - rollback of a failed turn
+  - the empty reply on Oracle
+  - memory read back through a new repository and window (what a restart builds)
+  - the cascade on delete
+- `ConversationControllerTest` is down to 9 cases (no 409), and `ConversationStoreTest` was removed with the store.

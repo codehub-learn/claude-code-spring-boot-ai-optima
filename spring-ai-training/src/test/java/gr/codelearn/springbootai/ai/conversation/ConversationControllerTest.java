@@ -27,8 +27,8 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
- * Unit 9.1 slice test for {@link ConversationController}: the resource shape (201 + Location, 200, 204), validation, and the 404 / 409 /
- * 502 mappings. {@link ConversationService} is mocked.
+ * Unit 9.1 slice test for {@link ConversationController}: the resource shape (201 + Location, 200, 204), validation, and the 404 / 502
+ * mappings (9.2 dropped the 409 limits). {@link ConversationService} is mocked.
  */
 @WebMvcTest(ConversationController.class)
 class ConversationControllerTest {
@@ -107,15 +107,6 @@ class ConversationControllerTest {
 										   .bodyJson()
 										   .extractingPath("$.detail")
 										   .isEqualTo("No conversation with id " + ID);
-	}
-
-	@Test
-	void fullConversationReturns409() {
-		given(conversationService.send(any(), any())).willThrow(new ConversationLimitException("The conversation reached 20 turns"));
-
-		assertThat(mvc.post().uri(MESSAGES).contentType(MediaType.APPLICATION_JSON).content("""
-																							{"content": "One more"}"""))
-				.hasStatus(HttpStatus.CONFLICT);
 	}
 
 	@Test

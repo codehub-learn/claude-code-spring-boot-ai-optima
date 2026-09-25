@@ -5,6 +5,29 @@ spring:
     virtual:
       # Java 21+ virtual threads for request handling and @Async; keeps blocking code cheap under load.
       enabled: true
+  datasource:
+    # Unit 9.2: chat memory lives in Oracle, the compose instance spring-boot-training uses too, but in this module's own schema user
+    # ai_training (created by compose/oracle-startdb). A throwaway local credential, like compose.yaml's; prod overrides with
+    # SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD. The app assumes the database is up and migrated (./mvnw -pl spring-ai-training
+    # flyway:migrate); tests use Testcontainers instead.
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: ai_training
+    password: ai_training
+    hikari:
+      pool-name: ai-training-pool
+      # Small pool: memory reads/writes are short, and no connection is held while the model answers (see ConversationService).
+      maximum-pool-size: 5
+      minimum-idle: 1
+  flyway:
+    # Not applied on app boot: ./mvnw -pl spring-ai-training flyway:migrate (connection in the module pom). Only the test profile
+    # turns Boot's Flyway on, for its throwaway Testcontainers database.
+    enabled: false
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+  data:
+    jdbc:
+      # Spring Data JDBC (the conversation registry): stated, not auto-detected from the driver on every start.
+      dialect: oracle
   ai:
     model:
       # Unit 7.1: which provider's ChatModel bean is created. Both starters (Anthropic, Ollama) are on the classpath and each one's chat
@@ -22,6 +45,13 @@ spring:
         initial-interval: 1s
         multiplier: 2
         max-interval: 5s
+    chat:
+      memory:
+        repository:
+          jdbc:
+            # Unit 9.2: JdbcChatMemoryRepository can create its table from its bundled schema-oracle.sql. Never: Flyway owns the
+            # schema (V1__create_chat_memory.sql copies that table and adds a foreign key to conversation).
+            initialize-schema: never
     # See for details: https://docs.spring.io/spring-ai/reference/api/chat/ollama-chat.html
     ollama:
       chat:
@@ -125,3 +155,7 @@ app:
     # Unit 7.4: the one switch between the cloud and the local chat model: anthropic | ollama. Feeds spring.ai.model.chat (top of
     # this file). Default: the cloud. The `local` profile switches to ollama, the `anthropic` profile back to anthropic.
     chat-provider: anthropic
+    memory:
+      # Unit 9.2: how many messages (user + assistant, one turn = 2) a conversation's memory keeps and sends back to the model.
+      # Older ones are dropped for good, and the kept window always starts at a user message. 20 = the last 10 turns.
+      max-messages: 20

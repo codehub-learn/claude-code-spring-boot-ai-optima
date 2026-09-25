@@ -32,6 +32,9 @@ import java.util.UUID;
  * {@code Location}), {@code POST /conversations/{id}/messages} takes a turn, {@code GET} the same path reads the history,
  * {@code DELETE /conversations/{id}} ends it. Compare the stateless {@code chat} endpoints, which have no id and no URL for state.
  *
+ * <p>Unit 9.2 kept this API and moved the state into Spring AI's chat memory in Oracle (see {@link ConversationService}); the 409
+ * limits are gone.
+ *
  * <p>Versioned the same way as {@code chat.ChatController} (path segment 1, {@code version = "v1"}).
  */
 @RestController
@@ -48,9 +51,6 @@ class ConversationController {
 	@PostMapping(version = "v1")
 	@Operation(summary = "Start a conversation", description = "Creates an empty server-side conversation and returns its id.")
 	@ApiResponse(responseCode = "201", description = "Created; the Location header points at the conversation")
-	@ApiResponse(responseCode = "409", description = "Too many open conversations",
-				 content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
-									schema = @Schema(implementation = ProblemDetail.class)))
 	ResponseEntity<ConversationResponse> create() {
 		final ConversationResponse conversation = conversationService.create();
 		final URI location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(conversation.id()).toUri();
@@ -59,15 +59,15 @@ class ConversationController {
 
 	@PostMapping(path = "/{id}/messages", version = "v1", consumes = MediaType.APPLICATION_JSON_VALUE)
 	@Operation(summary = "Send the next message",
-			   description = "The model sees the system prompt, every earlier turn of this conversation, and the new message.")
+			   description =
+			           "The model sees the system prompt, the remembered part of this conversation (the last app.ai.memory.max-messages " +
+					   "messages), "
+					   + "and the new message.")
 	@ApiResponse(responseCode = "200", description = "The reply, the turn number, the model name, and the token usage")
 	@ApiResponse(responseCode = "400", description = "A blank or oversized message, a malformed id, or an unsupported API version",
 				 content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
 									schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "404", description = "No such conversation",
-				 content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
-									schema = @Schema(implementation = ProblemDetail.class)))
-	@ApiResponse(responseCode = "409", description = "The conversation reached its turn limit",
 				 content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
 									schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "502", description = "The chat model is unreachable or failed; the turn is not stored",
@@ -78,7 +78,8 @@ class ConversationController {
 	}
 
 	@GetMapping(path = "/{id}/messages", version = "v1")
-	@Operation(summary = "Read the history", description = "The stored turns in order: user, assistant, user, ...")
+	@Operation(summary = "Read the history",
+	           description = "The remembered messages in order: user, assistant, user, ... Older ones have left the window.")
 	@ApiResponse(responseCode = "200", description = "The messages")
 	@ApiResponse(responseCode = "404", description = "No such conversation",
 				 content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
@@ -88,7 +89,7 @@ class ConversationController {
 	}
 
 	@DeleteMapping(path = "/{id}", version = "v1")
-	@Operation(summary = "End a conversation", description = "Drops the conversation and its history.")
+	@Operation(summary = "End a conversation", description = "Deletes the conversation and its memory.")
 	@ApiResponse(responseCode = "204", description = "Deleted")
 	@ApiResponse(responseCode = "404", description = "No such conversation",
 				 content = @Content(mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,

@@ -1,70 +1,31 @@
 package gr.codelearn.springbootai.ai.conversation;
 
-import org.springframework.ai.chat.messages.Message;
+import org.jspecify.annotations.Nullable;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Unit 9.1: one server-side conversation, the state a stateless endpoint doesn't have. It holds the turns so far as Spring AI
- * {@link Message}s (user, assistant, user, ...), exactly what goes back to the model on the next turn.
+ * Unit 9.2: a conversation's registry row (table {@code conversation}), a Spring Data JDBC aggregate. It says that the conversation exists
+ * and how many turns it has had; the messages themselves are in Spring AI's chat memory table, keyed by the same id.
  *
- * <p>A turn is taken under the conversation's own lock, model call included: two requests for the same conversation run one after the
- * other, so neither answers from a history that is missing the other's turn. Other conversations are not blocked. A {@link ReentrantLock},
- * not {@code synchronized}, so a waiting virtual thread doesn't pin its carrier.
+ * <p>The id is assigned here, not by the database, so Spring Data JDBC tells a new row from an existing one by {@link #version()}:
+ * {@code null} means insert. The version also makes a lost update fail instead of silently overwriting {@link #turns()}.
+ *
+ * @param id        the conversation id, a UUID as text (Oracle has no UUID type; the memory table keys on the same text)
+ * @param createdAt when it was started
+ * @param turns     completed turns since it started, including those the memory window has since dropped
+ * @param version   optimistic-locking version, {@code null} before the first save
  */
-final class Conversation {
+record Conversation(@Id String id, Instant createdAt, int turns, @Version @Nullable Long version) {
 
-	private final UUID id;
-	private final Instant createdAt;
-	private final List<Message> messages = new ArrayList<>();
-	private final ReentrantLock lock = new ReentrantLock();
-
-	Conversation(final UUID id, final Instant createdAt) {
-		this.id = id;
-		this.createdAt = createdAt;
+	static Conversation start(final UUID id, final Instant now) {
+		return new Conversation(id.toString(), now, 0, null);
 	}
 
-	UUID id() {
-		return id;
-	}
-
-	Instant createdAt() {
-		return createdAt;
-	}
-
-	ReentrantLock lock() {
-		return lock;
-	}
-
-	/**
-	 * A copy of the history; callers read it while holding {@link #lock()} or accept a snapshot.
-	 */
-	List<Message> messages() {
-		lock.lock();
-		try {
-			return List.copyOf(messages);
-		} finally {
-			lock.unlock();
-		}
-	}
-
-	/**
-	 * Completed turns: one user message plus one assistant reply each.
-	 */
-	int turns() {
-		return messages().size() / 2;
-	}
-
-	/**
-	 * Adds a finished turn. Only called with {@link #lock()} held and only after the model answered, so a failed call leaves no half turn
-	 * behind.
-	 */
-	void addTurn(final Message user, final Message assistant) {
-		messages.add(user);
-		messages.add(assistant);
+	Conversation withNextTurn() {
+		return new Conversation(id, createdAt, turns + 1, version);
 	}
 }

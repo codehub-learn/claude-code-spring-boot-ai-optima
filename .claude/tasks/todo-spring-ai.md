@@ -84,7 +84,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 - [x] **9.1 Stateless vs stateful conversations** — a stateless single-turn endpoint next to a
   stateful multi-turn one, showing the difference explicitly in the request/response shape.
-- [ ] **9.2 Memory lifecycle** — `ChatMemory` (message-window or repository-backed) wired as an
+- [x] **9.2 Memory lifecycle** — `ChatMemory` (message-window or repository-backed) wired as an
   `Advisor`, memory eviction/window-size config, a note on where memory is persisted (in-memory
   vs a DB-backed `ChatMemoryRepository`) and its lifecycle across sessions.
 
@@ -478,3 +478,37 @@ own module — no code here should be required for the Spring Boot units to buil
 - README: new U9 heading, 9.1 section (the three styles side by side, the resource, how a turn works, the store's limits, live
   run, trade-off table, statuses).
 - Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 106 unit/slice + 27 IT, 0 failures).
+
+### 9.2 Memory lifecycle (done)
+
+- User decisions: **JDBC on Oracle** (not in-memory with a note); go-ahead for a dedicated `ai_training` schema user and a
+  Testcontainers Oracle for every `@SpringBootTest`. The 9.1 API stays; its hand-rolled store is replaced, as 9.1's Javadoc said.
+- Infra: `compose/oracle-startdb/01_ai_training_user.sql` (`CREATE USER IF NOT EXISTS ai_training`, `DB_DEVELOPER_ROLE`), mounted
+  at `/container-entrypoint-startdb.d` (every start, so the existing `oracle-data` volume gets it; the container was recreated once,
+  data kept). Own schema because two Flyway histories can't share one and a `flyway:clean` here must not drop the catalog.
+- Pom: `spring-ai-starter-model-chat-memory-repository-jdbc`, `spring-boot-starter-data-jdbc`, `ojdbc17`, `spring-boot-flyway` +
+  `flyway-database-oracle`, test `spring-boot-testcontainers` + `testcontainers-oracle-free`, and a `flyway-maven-plugin` (no
+  executions, user `ai_training`). `application.yml`: datasource, `spring.flyway.enabled: false` (test profile: true),
+  `spring.ai.chat.memory.repository.jdbc.initialize-schema: never`, `app.ai.memory.max-messages: 20`.
+- `V1__create_chat_memory.sql`: `conversation` (id, created_at, turns, version) + the library's `spring_ai_chat_memory` (names
+  fixed by `OracleChatMemoryRepositoryDialect`) with `fk_..._conversation ... on delete cascade`.
+- `config.ai.ChatMemoryConfig` (`MessageWindowChatMemory` over the autoconfigured `JdbcChatMemoryRepository`, window from the new
+  validated `ChatMemoryProperties`; a `MessageChatMemoryAdvisor` bean) and `conversation`: `Conversation` is now a Spring Data JDBC
+  record (`@Version` for new-vs-existing, id assigned by the app), `ConversationRepository`; `ConversationService` adds the
+  advisor per call with `CONVERSATION_ID`, writes back the previous window on failure, counts turns, 64 striped locks. Removed:
+  `ConversationStore`, `ConversationLimitException` and its 409 handler.
+- Findings (Spring AI 2.0.1 sources + tests): the autoconfig hard-codes a 20-message window with no property; the window snaps its
+  start to a user message and never evicts system messages; the advisor stores the user message **before** the call (half turn on
+  failure) and throws without a conversation id (so it can't be a default advisor); `JdbcChatMemoryRepository` drops tool-call
+  messages with a WARN and stores text only; `saveAll` is delete + batch insert in its own transaction. Oracle `''` = `NULL`, so an
+  empty reply fails with `ORA-01400` on `CONTENT` (confirmed in the IT log) and goes through the same rollback to a 502.
+- Tests: `ChatMemoryTest` (6), `ConversationApiIT` (9: +window over 12 turns, rollback, empty reply, read back through a new
+  repository/window, cascade; -turn limit), `ConversationControllerTest` (9, -409), `ConversationStoreTest` removed. New
+  `support.SharedOracleContainer` + `AbstractOracleIntegrationTest`; all six `@SpringBootTest` classes extend it.
+- Verified live on Ollama (`local`, port 8081, startup line `provider=OLLAMA`, window 4): turn 4 no longer had turn 1 (the model
+  didn't know the name, though earlier replies still in the window had echoed it); after stopping and restarting the app the same
+  conversation had its 4 messages and turn 5 answered "Spring Boot" from memory; DELETE → 204 then 404, both tables empty.
+  Prompt tokens 163 → 197 → 260 → 298 → 310. Not run: Anthropic.
+- README: 9.2 section (the three layers, the per-call advisor, window rules, where memory lives, schema / Flyway, pitfalls,
+  concurrency, live run, statuses, tests); "Run it" now starts Oracle and migrates first.
+- Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 115 unit/slice + 30 IT, 0 failures).
