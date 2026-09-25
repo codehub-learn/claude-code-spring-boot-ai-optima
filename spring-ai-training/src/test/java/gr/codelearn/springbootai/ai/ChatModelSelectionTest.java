@@ -1,5 +1,7 @@
 package gr.codelearn.springbootai.ai;
 
+import gr.codelearn.springbootai.ai.support.SharedOracleContainer;
+
 import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import org.springframework.ai.ollama.api.ThinkOption;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.testcontainers.oracle.OracleContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code config.ai.ChatClientConfig}) with both provider starters on the classpath and varies only the configuration: the
  * {@code app.ai.chat-provider} switch, directly or through a profile. Nothing here calls a model except the retry test, which calls an
  * Ollama address where nothing listens: neither an API key nor a running Ollama server is needed, since both clients connect lazily.
+ * Since 9.2 it needs a database, the shared Testcontainers Oracle.
  */
 class ChatModelSelectionTest {
 
@@ -132,6 +136,21 @@ class ChatModelSelectionTest {
 		// "test" profile first (dummy Anthropic key, quiet logs), then any profiles under test. No web server: the selection happens in
 		// the
 		// bean graph, not over HTTP.
-		return new SpringApplicationBuilder(AiTrainingApplication.class).web(WebApplicationType.NONE).profiles(profiles).run(args);
+		return new SpringApplicationBuilder(AiTrainingApplication.class).web(WebApplicationType.NONE).profiles(profiles).run(withDatabase(args));
+	}
+
+	/**
+	 * Since 9.2 the context needs a database (chat memory, Flyway under the test profile). This test builds the application itself, so
+	 * {@code @ServiceConnection} does not apply: the shared Testcontainers Oracle is passed as plain properties. Without it the test
+	 * silently used the compose Oracle on localhost:1521 and failed whenever that was down.
+	 */
+	private static String[] withDatabase(final String... args) {
+		final OracleContainer oracle = SharedOracleContainer.INSTANCE;
+		final String[] all = new String[args.length + 3];
+		all[0] = "--spring.datasource.url=" + oracle.getJdbcUrl();
+		all[1] = "--spring.datasource.username=" + oracle.getUsername();
+		all[2] = "--spring.datasource.password=" + oracle.getPassword();
+		System.arraycopy(args, 0, all, 3, args.length);
+		return all;
 	}
 }
