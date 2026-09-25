@@ -90,7 +90,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U10 — RAG Foundations & Basic Monitoring
 
-- [ ] **10.1 RAG pipeline overview** — an end-to-end query → retrieval → context → generation
+- [x] **10.1 RAG pipeline overview** — an end-to-end query → retrieval → context → generation
   slice using `QuestionAnswerAdvisor`, documented as the reference flow.
 - [ ] **10.2 Chunking strategies** — a document ingestion step (`TokenTextSplitter` or similar),
   comparing at least two chunking configs and their effect on retrieval quality.
@@ -512,3 +512,46 @@ own module — no code here should be required for the Spring Boot units to buil
 - README: 9.2 section (the three layers, the per-call advisor, window rules, where memory lives, schema / Flyway, pitfalls,
   concurrency, live run, statuses, tests); "Run it" now starts Oracle and migrates first.
 - Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 115 unit/slice + 30 IT, 0 failures).
+
+### 10.1 RAG pipeline overview (done)
+
+- User decisions: embeddings from an **Ollama** model (for both chat providers); corpus = **both** the catalog rows (read-only
+  from `training`) and bundled catalog-domain documents.
+- Embedding model: `qwen3-embedding:0.6b` (1024 dims, Q8_0, ~640 MB), picked from a probe of 6 questions (one Greek) against
+  6 texts: 6/6 right first hits vs `embeddinggemma` 5/6, `nomic-embed-text` 4/6 (the latter without its task prefixes). The
+  other two were removed from the Ollama volume. Pulled by `ollama-pull` in `compose.yaml`.
+- Pom: `spring-ai-starter-vector-store-oracle` (excluding `ojdbc11`, `ucp`, `simplefan`: ojdbc17 is the driver) and
+  `spring-ai-vector-store-advisor` (the 2.0.1 name). `application.yml`: `spring.ai.model.embedding: ollama`,
+  `spring.ai.ollama.embedding.model`, `spring.ai.vectorstore.oracle.*` (table `knowledge_vector`, 1024, COSINE, IVF,
+  `forced-normalization: true`, `initialize-schema: false`), `app.ai.retrieval.*` (top-k 4, threshold 0),
+  `app.ai.knowledge.catalog-schema: training` (test profile: `test`).
+- `V2__create_knowledge_vector.sql` (the library's DDL, Flyway-owned, + IVF index);
+  `compose/oracle-startdb/02_ai_training_catalog_read.sql` (READ on `training.product` / `category`, skipped with a message
+  while the tables don't exist).
+- `config.ai.RagConfig` (`QuestionAnswerAdvisor` bean: `SearchRequest` from the validated `RetrievalProperties`, template
+  `prompts/knowledge/question-answer.st`, explicit order `DEFAULT_CHAT_MEMORY_PRECEDENCE_ORDER + 100`). Feature `knowledge`:
+  `CatalogDocumentReader` (JdbcClient, `GEN-*` excluded, text `[catalog:SKU] name. Category. Price. description`, name-based
+  UUID ids), `BundledDocumentReader` (`classpath:knowledge/*.md`, 4 docs, whole), `KnowledgeIngestionService` (delete both
+  sources, `vectorStore.add`), `KnowledgeService` (per-call advisor, sources from `RETRIEVED_DOCUMENTS`),
+  `KnowledgeController` (`POST /api/v1/knowledge/ingestions`, `POST /api/v1/knowledge/answers`), DTO records,
+  `KnowledgeProperties` (schema name validated as an identifier, since it goes into the SQL).
+- Findings: only document **text** reaches the model (metadata never), so tags and facts go in the text; the advisor's
+  default order (0) ties with `SimpleLoggerAdvisor`; a similarity threshold throws unless `forced-normalization` is on;
+  metadata read back from Oracle's JSON column holds driver JSON values whose `toString()` keeps the quotes (`"LAP-0002"`,
+  caught by the IT, unwrapped in `KnowledgeService.text`); `number(12,2)` 2199.00 comes back as `2199` (formatted to 2
+  decimals); the 7.1 test pinning "no EmbeddingModel until RAG" now pins the opposite
+  (`embeddingsComeFromOllamaWhicheverChatProviderIsActive`).
+- Mistake along the way: the IDE reformat of the already-applied `V2` split `create vector index` onto two lines (IntelliJ's
+  SQL formatter doesn't know the statement) and `flyway:validate` reported a checksum mismatch. The original text was restored
+  and validates again. See lessons.md.
+- Live on Ollama (`local`, port 8081, startup line `provider=OLLAMA`, `Retrieval: store=OracleVectorStore, top-k=4`): ingestion
+  24 + 4 documents in 8 s. "3D rendering laptop + warranty": the guide, the warranty doc and LAP-0002 retrieved (.57/.54/.53), a
+  correct answer citing all three. Opened earbuds: returns-policy .70, a correct "no". A Greek shipping question: shipping first
+  but only .31, the price right, answered in English with a misread cut-off time. "Gaming consoles": best .33, answered "not
+  covered". Prompt tokens 498 to 967. Not run: Anthropic.
+- Tests: `RagTest` (4), `KnowledgeDocumentsTest` (3), `KnowledgeControllerTest` (6), `KnowledgeApiIT` (5, real
+  `knowledge_vector` table, hashing stub embedding model, `@Sql` catalog fixture), `ChatModelSelectionTest` (one case
+  replaced).
+- README: new U10 heading, 10.1 section (the two phases, the four pieces, model choice, ingestion, text vs metadata, live
+  table and what it shows, pitfalls, statuses, setup, tests).
+- Verified: full-reactor `./mvnw verify` → `BUILD SUCCESS` (spring-ai-training: 128 unit/slice + 35 IT, 0 failures).

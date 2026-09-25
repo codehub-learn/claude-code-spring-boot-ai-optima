@@ -518,3 +518,11 @@ Patterns captured after user corrections. Review at session start.
 - Never put the proposed commit message inside an `AskUserQuestion` option preview: the box truncates long lines and the user
   can't read the whole message. Write it as a fenced block in the reply and ask the verify / approve / tag questions in plain text.
   User correction, 2026-09-24.
+
+## Never reformat an applied Flyway migration (U10.1)
+
+- IntelliJ's SQL formatter doesn't know Oracle 23ai's `create vector index ... organization neighbor partitions`: it split the
+  statement across lines (`create` / `vector index ...`). The `V2` script had already been applied locally, so the reformat was
+  a checksum change and `flyway:validate` failed ("Migration checksum mismatch for migration version 2"). Rule: run
+  `flyway:migrate` only after the migration's final formatting, and leave already-applied `V*` files out of `reformat_file`. After
+  any reformat that touched SQL, run `flyway:validate` and read the file back.

@@ -34,8 +34,9 @@ spring:
       # autoconfig is active only when this names it; left unset, BOTH activate (matchIfMissing) and the ChatClient.Builder fails on
       # two ChatModel beans. Unit 7.4: never set it directly; it follows the validated app.ai.chat-provider (bottom of this file).
       chat: ${app.ai.chat-provider}
-      # The Ollama starter also brings an EmbeddingModel. Embeddings arrive with RAG in U10; until then, none.
-      embedding: none
+      # Unit 10.1: embeddings come from Ollama whichever chat provider is active (Anthropic has no embeddings API), so RAG needs the
+      # Ollama server even under the anthropic profile. The model is spring.ai.ollama.embedding.model below.
+      embedding: ollama
     retry:
       # Unit 7.4: Spring AI's RetryTemplate, used by the Ollama path only (Anthropic retries inside its own SDK, see max-retries below).
       # The defaults are 10 attempts with an uncapped 2 s x5 backoff: with Ollama down a request hung for minutes. Capped so a dead
@@ -52,6 +53,20 @@ spring:
             # Unit 9.2: JdbcChatMemoryRepository can create its table from its bundled schema-oracle.sql. Never: Flyway owns the
             # schema (V1__create_chat_memory.sql copies that table and adds a foreign key to conversation).
             initialize-schema: never
+    vectorstore:
+      oracle:
+        # Unit 10.1: Oracle AI Vector Search, in this module's schema. The table is Flyway's (V2__create_knowledge_vector.sql, columns
+        # fixed by OracleVectorStore's SQL: id, content, metadata, embedding), so the store never creates or drops it.
+        initialize-schema: false
+        table-name: knowledge_vector
+        # Must equal the embedding model's output length and the table's vector(1024, FLOAT64) column. Changing the model means a
+        # new migration and re-ingesting everything: vectors from two models are not comparable.
+        dimensions: 1024
+        distance-type: COSINE
+        index-type: IVF
+        # Normalize vectors to length 1 before storing and searching. Required for a similarity threshold (without it any
+        # SearchRequest with a threshold fails at runtime), and makes COSINE and DOT rank alike.
+        forced-normalization: true
     # See for details: https://docs.spring.io/spring-ai/reference/api/chat/ollama-chat.html
     ollama:
       chat:
@@ -64,6 +79,11 @@ spring:
         think: false
         # Context window in tokens (system prompt + history + reply). Its KV cache costs memory on top of the weights: ~256 MB here.
         num-ctx: 8192
+      embedding:
+        # Unit 10.1: Qwen3-Embedding 0.6B (Q8_0, ~640 MB, 1024 dimensions, multilingual). Picked over embeddinggemma and
+        # nomic-embed-text on a catalog retrieval probe (6/6 right first hits vs 5/6 and 4/6, one question in Greek). Pulled by the
+        # ollama-pull compose service; keep both in sync. Left unset, Spring AI falls back to mxbai-embed-large.
+        model: qwen3-embedding:0.6b
     # See for details: https://docs.spring.io/spring-ai/reference/api/chat/anthropic-chat.html
     anthropic:
       # The key comes from the environment only, so it never appears in a committed file. The app still starts without
@@ -159,3 +179,12 @@ app:
       # Unit 9.2: how many messages (user + assistant, one turn = 2) a conversation's memory keeps and sends back to the model.
       # Older ones are dropped for good, and the kept window always starts at a user message. 20 = the last 10 turns.
       max-messages: 20
+    retrieval:
+      # Unit 10.1 (config.ai.RetrievalProperties): how many documents retrieval hands to the model per question (the k of top-k).
+      top-k: 4
+      # Minimum similarity (0-1, 1 - cosine distance) for a document to count as retrieved. 0 accepts the whole top-k; 10.2 tunes it.
+      similarity-threshold: 0.0
+    knowledge:
+      # Unit 10.1 (knowledge.KnowledgeProperties): the schema holding spring-boot-training's catalog tables, read-only (grant in
+      # compose/oracle-startdb/02_ai_training_catalog_read.sql).
+      catalog-schema: training

@@ -8,6 +8,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.ollama.OllamaChatModel;
+import org.springframework.ai.ollama.OllamaEmbeddingModel;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.ai.ollama.api.ThinkOption;
 import org.springframework.boot.WebApplicationType;
@@ -57,9 +58,13 @@ class ChatModelSelectionTest {
 	}
 
 	@Test
-	void theOllamaEmbeddingModelStaysOffUntilRag() {
-		try (ConfigurableApplicationContext context = start("--app.ai.chat-provider=ollama")) {
-			assertThat(context.getBeansOfType(EmbeddingModel.class)).isEmpty();
+	void embeddingsComeFromOllamaWhicheverChatProviderIsActive() {
+		// Unit 10.1 (was "no EmbeddingModel until RAG" in 7.1): Anthropic has no embeddings API, so RAG embeds with Ollama under both
+		// chat providers. The chat switch and the embedding switch are independent.
+		try (ConfigurableApplicationContext context = start()) {
+			assertSingleChatModel(context, AnthropicChatModel.class);
+			assertThat(context.getBeansOfType(EmbeddingModel.class).values()).singleElement().isInstanceOf(OllamaEmbeddingModel.class);
+			assertThat(context.getEnvironment().getProperty("spring.ai.ollama.embedding.model")).isEqualTo("qwen3-embedding:0.6b");
 		}
 	}
 

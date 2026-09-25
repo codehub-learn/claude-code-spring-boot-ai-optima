@@ -584,12 +584,12 @@ app.ai.chat-provider: anthropic                 # the default: the cloud
 
 The profiles only set that one key:
 
-| Active profiles                                         | `app.ai.chat-provider`        | `ChatModel`                                    |
-|---------------------------------------------------------|-------------------------------|------------------------------------------------|
-| none                                                    | `anthropic` (application.yml) | `AnthropicChatModel`                           |
-| `local` (what `./mvnw spring-boot:run` activates)       | `ollama`                      | `OllamaChatModel` (`qwen3.5:4b`)               |
-| `anthropic`                                             | `anthropic`                   | `AnthropicChatModel`                           |
-| `local,anthropic`                                       | `anthropic` (last one wins)   | `AnthropicChatModel`, with the local dev setup |
+| Active profiles                                   | `app.ai.chat-provider`        | `ChatModel`                                    |
+|---------------------------------------------------|-------------------------------|------------------------------------------------|
+| none                                              | `anthropic` (application.yml) | `AnthropicChatModel`                           |
+| `local` (what `./mvnw spring-boot:run` activates) | `ollama`                      | `OllamaChatModel` (`qwen3.5:4b`)               |
+| `anthropic`                                       | `anthropic`                   | `AnthropicChatModel`                           |
+| `local,anthropic`                                 | `anthropic` (last one wins)   | `AnthropicChatModel`, with the local dev setup |
 
 ```bash
 ./mvnw -pl spring-ai-training spring-boot:run                                              # local: Ollama
@@ -615,13 +615,13 @@ A missing value fails the record's `@NotNull` before the two `ChatModel` beans c
 
 **Resilience.** The two providers retry in different places, with different settings:
 
-|                   | Anthropic (cloud)                                                    | Ollama (local)                                                        |
-|-------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------|
-| Who retries       | the Anthropic Java SDK inside `AnthropicChatModel`                   | Spring AI's `RetryTemplate` (Spring Framework 7 core retry)           |
-| Settings          | `spring.ai.anthropic.max-retries: 2`, `timeout: 60s`                 | `spring.ai.retry.*`                                                   |
-| What is retried   | connection errors, 408, 409, 429, 5xx; honours `Retry-After`         | connection errors and 5xx; 4xx never (e.g. a model that isn't pulled) |
-| Backoff           | 0.5 s, doubling up to 8 s, with jitter                               | was 2 s x5, uncapped, 10 retries; now 1 s x2, max 5 s, 3 retries      |
-| Per-attempt limit | 60 s (the SDK default is 10 minutes)                                 | none set: a long generation holds the request                         |
+|                   | Anthropic (cloud)                                            | Ollama (local)                                                        |
+|-------------------|--------------------------------------------------------------|-----------------------------------------------------------------------|
+| Who retries       | the Anthropic Java SDK inside `AnthropicChatModel`           | Spring AI's `RetryTemplate` (Spring Framework 7 core retry)           |
+| Settings          | `spring.ai.anthropic.max-retries: 2`, `timeout: 60s`         | `spring.ai.retry.*`                                                   |
+| What is retried   | connection errors, 408, 409, 429, 5xx; honours `Retry-After` | connection errors and 5xx; 4xx never (e.g. a model that isn't pulled) |
+| Backoff           | 0.5 s, doubling up to 8 s, with jitter                       | was 2 s x5, uncapped, 10 retries; now 1 s x2, max 5 s, 3 retries      |
+| Per-attempt limit | 60 s (the SDK default is 10 minutes)                         | none set: a long generation holds the request                         |
 
 `spring.ai.retry.*` does nothing for Anthropic, and `max-retries` does nothing for Ollama. Worst case on the cloud path:
 3 attempts x 60 s plus backoff, about 3 minutes before the 502.
@@ -632,10 +632,10 @@ then 250 s). With the caps in `application.yml` it is 1 call + 3 retries, waitin
 
 Rules of thumb:
 
-- **One retry layer only.** Don't put a `@Retryable` on `ChatService` on top of the provider's own retries: attempts multiply
-  (3 x 3 = 9 calls, each one billed by Anthropic if it reached the model).
-- **No new library for it.** CLAUDE.md lists Spring Retry; Spring Framework 7 now ships the same thing in core
-  (`RetryTemplate`, `@Retryable`, `@ConcurrencyLimit`, switched on with `@EnableResilientMethods`), and Spring AI 2 already uses it.
+- **One retry layer only.** Don't put a `@Retryable` on `ChatService` on top of the provider's own retries: attempts multiply (3 x 3 = 9
+  calls, each one billed by Anthropic if it reached the model).
+- **No new library for it.** CLAUDE.md lists Spring Retry; Spring Framework 7 now ships the same thing in core (`RetryTemplate`,
+  `@Retryable`, `@ConcurrencyLimit`, switched on with `@EnableResilientMethods`), and Spring AI 2 already uses it.
   Reach for that if app-level retry is ever needed.
 - **Streaming** retries only cover opening the stream. A failure in the middle ends it with the in-band `error` event (6.3).
 - **Retrying is not a fallback.** Switching to the local model when the cloud is down, or failing fast after repeated errors, is a
@@ -661,8 +661,8 @@ like code, and changed without touching Java:
 | `POST /api/v1/product-descriptions` | `prompts/writing/product-description.st` | `name`, `category`, `features` (1-10), `tone`, optional `language` |
 
 The `writing` feature: `WritingController` → `WritingService` → `WritingPrompts` (one `PromptTemplate` per file, loaded once as a
-`Resource`) → the rendered text goes in as the **user** message through the central `ChatClient`. The application's system prompt
-(6.4) still comes first: the template is the task, the system prompt the standing rules.
+`Resource`) → the rendered text goes in as the **user** message through the central `ChatClient`. The application's system prompt (6.4)
+still comes first: the template is the task, the system prompt the standing rules.
 
 **Template syntax.** Spring AI renders templates with StringTemplate (ST), `{}` delimiters by default:
 
@@ -762,17 +762,17 @@ from your general knowledge, and say so plainly if you are not sure": an **instr
 message; the application's system prompt (6.4) comes first, untouched, so the standing rules and the task's instructions stay
 apart too.
 
-| Layer                     | Who writes it     | Changes       | Where                                            |
-|---------------------------|-------------------|---------------|--------------------------------------------------|
-| System prompt (6.4)       | the application   | never         | `prompts/chat-system.st`, the `ChatClient` default |
-| Task instructions         | the application   | per use case  | `prompts/answer/question.st`, `<instructions>`   |
-| Context                   | the caller        | per call      | request `documents`, `<documents>`               |
-| Question                  | the caller        | per call      | request `question`, `<question>`                 |
+| Layer               | Who writes it   | Changes      | Where                                              |
+|---------------------|-----------------|--------------|----------------------------------------------------|
+| System prompt (6.4) | the application | never        | `prompts/chat-system.st`, the `ChatClient` default |
+| Task instructions   | the application | per use case | `prompts/answer/question.st`, `<instructions>`     |
+| Context             | the caller      | per call     | request `documents`, `<documents>`                 |
+| Question            | the caller      | per call     | request `question`, `<question>`                   |
 
 The `answer` feature: `AnswerController` (`POST /api/v1/answers`) → `AnswerService` → `AnswerPrompts` → the central `ChatClient`.
 Request: `question` (required, up to 1000 characters) and `documents` (optional, up to 5, each a `title` and up to 4000
-characters of `text`). The limits keep the prompt inside the local model's 8192-token context (7.2): Ollama silently drops the
-*start* of a prompt that doesn't fit, which is exactly where the instructions are.
+characters of `text`). The limits keep the prompt inside the local model's 8192-token context (7.2): Ollama silently drops the *start* of a
+prompt that doesn't fit, which is exactly where the instructions are.
 
 **The contrast, live** (`local` profile, `qwen3.5:4b` on the GPU):
 
@@ -807,19 +807,19 @@ untrusted when the context is. Where the context comes from a search instead of 
 
 **Two more template pitfalls**, found here and pinned in `PromptTemplatesTest`:
 
-| Pitfall                                               | What happens                                                                       | Fix                                                                    |
-|-------------------------------------------------------|------------------------------------------------------------------------------------|------------------------------------------------------------------------|
-| A list element used twice in its template (`{d.title}` then `{d.text}`) | `IllegalStateException`: "Missing variable names are: [d]"; plain ST would render it | render each element with its own template (`document.st`) and list the results |
-| A record as a template value (`{document.title}`)     | empty text, only an error line in the log: ST reads `getX()` / `isX()` / public fields | a `Map` (or a JavaBean)                                                |
+| Pitfall                                                                 | What happens                                                                           | Fix                                                                            |
+|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| A list element used twice in its template (`{d.title}` then `{d.text}`) | `IllegalStateException`: "Missing variable names are: [d]"; plain ST would render it   | render each element with its own template (`document.st`) and list the results |
+| A record as a template value (`{document.title}`)                       | empty text, only an error line in the log: ST reads `getX()` / `isX()` / public fields | a `Map` (or a JavaBean)                                                        |
 
 `{if(...)}` / `{endif}` on a line of their own also swallow that line's break, so a blank line between sections goes *inside*
 the `if` block.
 
-| Status | When                                                                                  |
-|--------|---------------------------------------------------------------------------------------|
-| 200    | the answer, the model name, the token usage                                           |
+| Status | When                                                                                                  |
+|--------|-------------------------------------------------------------------------------------------------------|
+| 200    | the answer, the model name, the token usage                                                           |
 | 400    | a validation failure (with an `errors` list, e.g. `documents[0].text`), or an unsupported API version |
-| 502    | the chat model is unreachable or failed                                               |
+| 502    | the chat model is unreachable or failed                                                               |
 
 **Tests.** `AnswerPromptsTest` (5, no model: instruction-only vs context prompts, empty list = none, an injected instruction stays
 inside its document, braces kept); `PromptTemplatesTest` +2 (the pitfalls above); `AnswerControllerTest` (6, `@WebMvcTest`);
@@ -845,10 +845,10 @@ The text goes into `prompts/extraction/product.st` as data, the same way as 8.2.
 
 **Two ways to get the schema to the model**, picked per request with `"outputMode"`:
 
-| Mode               | How                                                                                 | Code                                                        |
-|--------------------|-------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| `prompt` (default) | the schema goes into the user message as format instructions ("Your response should be in JSON format ... Here is the JSON Schema ...") | `.entity(Type.class)`                                       |
-| `native`           | the schema goes to the provider as an API option (Ollama `format`, Anthropic structured outputs); nothing is added to the prompt | `.entity(Type.class, spec -> spec.useProviderStructuredOutput())` or `AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT` |
+| Mode               | How                                                                                                                                     | Code                                                                                                                 |
+|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `prompt` (default) | the schema goes into the user message as format instructions ("Your response should be in JSON format ... Here is the JSON Schema ...") | `.entity(Type.class)`                                                                                                |
+| `native`           | the schema goes to the provider as an API option (Ollama `format`, Anthropic structured outputs); nothing is added to the prompt        | `.entity(Type.class, spec -> spec.useProviderStructuredOutput())` or `AdvisorParams.ENABLE_NATIVE_STRUCTURED_OUTPUT` |
 
 `native` only works when the model's options implement `StructuredOutputChatOptions` (Anthropic and Ollama both do in 2.0.1).
 When they don't, Spring AI quietly falls back to `prompt`, with no warning.
@@ -880,34 +880,34 @@ curl -s -X POST localhost:8080/api/v1/product-extractions -H 'Content-Type: appl
 
 **Measured on `qwen3.5:4b`** (`local` profile, GPU), the same two texts in both modes:
 
-| Text       | `prompt`                                           | `native`                                                                                 |
-|------------|----------------------------------------------------|------------------------------------------------------------------------------------------|
-| headphones | correct, 1 call, 724 prompt tokens                  | 502: `price` without `currency` (the optional currency and stock status were dropped)    |
-| desk lamp  | correct, 1 call; the injected "1 EUR" was ignored   | shape OK but `category: AUDIO`, 270 prompt tokens                                         |
+| Text       | `prompt`                                          | `native`                                                                              |
+|------------|---------------------------------------------------|---------------------------------------------------------------------------------------|
+| headphones | correct, 1 call, 724 prompt tokens                | 502: `price` without `currency` (the optional currency and stock status were dropped) |
+| desk lamp  | correct, 1 call; the injected "1 EUR" was ignored | shape OK but `category: AUDIO`, 270 prompt tokens                                     |
 
 In `native` mode the schema only constrains the output; the model never reads the field descriptions or the "leave it out"
 rule, and it shows. The prompt is smaller (270 against ~720 tokens) but the answers are worse. Ollama's own docs recommend
 also describing the format in the prompt. With a small local model, `prompt` mode is the safer default; with a strong
-provider model, `native` adds a hard guarantee on the shape. Either way, the Jakarta layer is the one that catches wrong
-*values*. Not measured on Anthropic (it spends the user's credits).
+provider model, `native` adds a hard guarantee on the shape. Either way, the Jakarta layer is the one that catches wrong *values*. Not
+measured on Anthropic (it spends the user's credits).
 
 **Pitfalls**, pinned in `StructuredOutputTest` (Spring AI 2.0.1):
 
-| Pitfall                                                  | What happens                                                                                             | Fix                                                                                    |
-|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| An optional (`@Nullable`) field                          | left out of `required`, but typed `"number"`, not `["number","null"]`: an explicit `"price": null` fails the schema | the validation schema here also accepts `null` for optional properties (`allowNullForOptionalProperties`) |
-| ... left as generated                                    | measured: the lamp took **3 calls** (2,340 tokens), every reply rejected for its nulls, the last returned anyway | the fix above: 1 call, 782 tokens                                                      |
-| A springdoc `@Schema` on the output record               | Spring AI reads it too; its default `requiredMode` (AUTO) makes the field **required**, overriding `@Nullable` | keep OpenAPI annotations off records the model fills                                    |
-| The advisor's error message                              | `null found, number expected`: no field name                                                             | nothing to configure; keep field descriptions clear                                    |
-| The advisor runs out of attempts                         | no exception: the last reply goes to the converter anyway                                                | handle the converter's `JacksonException` and validate the record                     |
-| `native` on a model without structured output options    | silent fallback to `prompt` mode                                                                         | check the provider's options type                                                      |
-| The schema holds shape only                              | Jakarta constraints (`@Positive`, `@Pattern`, `@AssertTrue`) never reach the model                        | validate after mapping (layer 3)                                                       |
+| Pitfall                                               | What happens                                                                                                        | Fix                                                                                                       |
+|-------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| An optional (`@Nullable`) field                       | left out of `required`, but typed `"number"`, not `["number","null"]`: an explicit `"price": null` fails the schema | the validation schema here also accepts `null` for optional properties (`allowNullForOptionalProperties`) |
+| ... left as generated                                 | measured: the lamp took **3 calls** (2,340 tokens), every reply rejected for its nulls, the last returned anyway    | the fix above: 1 call, 782 tokens                                                                         |
+| A springdoc `@Schema` on the output record            | Spring AI reads it too; its default `requiredMode` (AUTO) makes the field **required**, overriding `@Nullable`      | keep OpenAPI annotations off records the model fills                                                      |
+| The advisor's error message                           | `null found, number expected`: no field name                                                                        | nothing to configure; keep field descriptions clear                                                       |
+| The advisor runs out of attempts                      | no exception: the last reply goes to the converter anyway                                                           | handle the converter's `JacksonException` and validate the record                                         |
+| `native` on a model without structured output options | silent fallback to `prompt` mode                                                                                    | check the provider's options type                                                                         |
+| The schema holds shape only                           | Jakarta constraints (`@Positive`, `@Pattern`, `@AssertTrue`) never reach the model                                  | validate after mapping (layer 3)                                                                          |
 
-| Status | When                                                                                                   |
-|--------|--------------------------------------------------------------------------------------------------------|
-| 200    | the product, the output mode, the model name, the token usage (all attempts)                           |
-| 400    | blank or oversized text, an unknown `outputMode`, or an unsupported API version                        |
-| 502    | the model failed, or its output stayed invalid after the repair attempts (with an `errors` list)       |
+| Status | When                                                                                             |
+|--------|--------------------------------------------------------------------------------------------------|
+| 200    | the product, the output mode, the model name, the token usage (all attempts)                     |
+| 400    | blank or oversized text, an unknown `outputMode`, or an unsupported API version                  |
+| 502    | the model failed, or its output stayed invalid after the repair attempts (with an `errors` list) |
 
 New in `common`: `InvalidModelOutputException` (the second 502 kind, with its problems), handled in `ApiExceptionHandler`.
 
@@ -924,20 +924,20 @@ the fields, the provider outage).
 **A model has no memory.** Every call is independent: the model knows only what that one request carries. A "conversation" is
 the application sending the earlier turns again each time. The only question is *who* keeps them:
 
-| Style                         | Endpoint                                       | The client sends                   | The server keeps     | The model sees                            |
-|-------------------------------|------------------------------------------------|------------------------------------|----------------------|-------------------------------------------|
-| Stateless, single turn (6.2)  | `POST /api/v1/chat-completions`                | `{"message": "..."}`               | nothing              | system prompt + this message              |
-| Stateless, multi-turn (6.3)   | `POST /api/v1/prompts`                         | the **whole** history, every turn  | nothing              | system prompt + everything the client sent |
-| **Stateful** (9.1)            | `POST /api/v1/conversations/{id}/messages`     | `{"content": "..."}`, the new message only | the history, by `id` | system prompt + stored turns + this message |
+| Style                        | Endpoint                                   | The client sends                           | The server keeps     | The model sees                              |
+|------------------------------|--------------------------------------------|--------------------------------------------|----------------------|---------------------------------------------|
+| Stateless, single turn (6.2) | `POST /api/v1/chat-completions`            | `{"message": "..."}`                       | nothing              | system prompt + this message                |
+| Stateless, multi-turn (6.3)  | `POST /api/v1/prompts`                     | the **whole** history, every turn          | nothing              | system prompt + everything the client sent  |
+| **Stateful** (9.1)           | `POST /api/v1/conversations/{id}/messages` | `{"content": "..."}`, the new message only | the history, by `id` | system prompt + stored turns + this message |
 
 The `conversation` feature makes the state a REST resource:
 
-| Request                                        | Response                                                              |
-|------------------------------------------------|-----------------------------------------------------------------------|
-| `POST /api/v1/conversations`                   | `201`, `Location: /api/v1/conversations/{id}`, `{"id", "createdAt"}`   |
-| `POST /api/v1/conversations/{id}/messages`     | `200`, `{"conversationId", "turn", "content", "model", "usage"}`      |
-| `GET /api/v1/conversations/{id}/messages`      | `200`, `[{"role": "user", "content"}, {"role": "assistant", ...}, ...]` |
-| `DELETE /api/v1/conversations/{id}`            | `204`                                                                 |
+| Request                                    | Response                                                                |
+|--------------------------------------------|-------------------------------------------------------------------------|
+| `POST /api/v1/conversations`               | `201`, `Location: /api/v1/conversations/{id}`, `{"id", "createdAt"}`    |
+| `POST /api/v1/conversations/{id}/messages` | `200`, `{"conversationId", "turn", "content", "model", "usage"}`        |
+| `GET /api/v1/conversations/{id}/messages`  | `200`, `[{"role": "user", "content"}, {"role": "assistant", ...}, ...]` |
+| `DELETE /api/v1/conversations/{id}`        | `204`                                                                   |
 
 **How a turn works** (`ConversationService.send`): load the history, call the model with
 `.system(...)`, `.messages(history)` and `.messages(newUserMessage)`, then store the user message and the reply as one turn. A
@@ -987,22 +987,22 @@ curl -s -X POST localhost:8080/api/v1/prompts -H 'Content-Type: application/json
 
 Prompt tokens: 170, 250, 282. Each turn pays again for every earlier one, which is the cost side of memory.
 
-| Stateless                                                     | Stateful                                                          |
-|---------------------------------------------------------------|-------------------------------------------------------------------|
-| any instance can answer; scales and restarts freely           | the state has to live somewhere every instance can reach          |
-| the client controls (and can forge) the history, see 6.4      | the server controls the history; the client can't rewrite it      |
-| the client resends everything: bigger requests                | small requests, same prompt size for the model                    |
-| nothing to clean up                                           | needs limits, expiry, deletion                                    |
+| Stateless                                                | Stateful                                                     |
+|----------------------------------------------------------|--------------------------------------------------------------|
+| any instance can answer; scales and restarts freely      | the state has to live somewhere every instance can reach     |
+| the client controls (and can forge) the history, see 6.4 | the server controls the history; the client can't rewrite it |
+| the client resends everything: bigger requests           | small requests, same prompt size for the model               |
+| nothing to clean up                                      | needs limits, expiry, deletion                               |
 
-| Status | When                                                                                              |
-|--------|---------------------------------------------------------------------------------------------------|
-| 201    | a conversation was created (`Location` header)                                                    |
-| 200    | a turn's reply, or the history                                                                    |
-| 204    | deleted                                                                                           |
-| 400    | a blank or oversized message, a malformed id, or an unsupported API version                       |
-| 404    | no such conversation (never created, deleted, or lost on restart)                                 |
-| 409    | 20 turns reached, or 1,000 open conversations                                                     |
-| 502    | the chat model failed; the turn is not stored                                                     |
+| Status | When                                                                        |
+|--------|-----------------------------------------------------------------------------|
+| 201    | a conversation was created (`Location` header)                              |
+| 200    | a turn's reply, or the history                                              |
+| 204    | deleted                                                                     |
+| 400    | a blank or oversized message, a malformed id, or an unsupported API version |
+| 404    | no such conversation (never created, deleted, or lost on restart)           |
+| 409    | 20 turns reached, or 1,000 open conversations                               |
+| 502    | the chat model failed; the turn is not stored                               |
 
 **Tests.** `ConversationStoreTest` (2: find / delete, the bound); `ConversationControllerTest` (10, `@WebMvcTest`: 201 +
 `Location`, 200, 204, 400 for a blank message and a malformed id, 404, 409, 502); `ConversationApiIT` (6: turn 2's prompt
@@ -1015,21 +1015,35 @@ keeps the history in Oracle.
 
 **Three layers, each replaceable on its own** (`config.ai.ChatMemoryConfig`):
 
-| Layer                  | Class here                                           | Decides                                                              |
-|------------------------|------------------------------------------------------|----------------------------------------------------------------------|
-| `ChatMemoryRepository` | `JdbcChatMemoryRepository` (JDBC starter autoconfig) | **where** messages live: table `spring_ai_chat_memory`, in Oracle    |
-| `ChatMemory`           | `MessageWindowChatMemory`                            | **which** messages are kept: the last `app.ai.memory.max-messages`   |
-| `Advisor`              | `MessageChatMemoryAdvisor`                           | **when** memory is read and written: around each call                |
+| Layer                  | Class here                                           | Decides                                                            |
+|------------------------|------------------------------------------------------|--------------------------------------------------------------------|
+| `ChatMemoryRepository` | `JdbcChatMemoryRepository` (JDBC starter autoconfig) | **where** messages live: table `spring_ai_chat_memory`, in Oracle  |
+| `ChatMemory`           | `MessageWindowChatMemory`                            | **which** messages are kept: the last `app.ai.memory.max-messages` |
+| `Advisor`              | `MessageChatMemoryAdvisor`                           | **when** memory is read and written: around each call              |
 
 A turn (`ConversationService.send`) no longer handles history at all:
 
 ```java
 chatClient.prompt()
-		.system(SystemPromptParams::fill)
-		.user(content)
-		.advisors(a -> a.advisors(chatMemoryAdvisor).param(ChatMemory.CONVERSATION_ID, conversationId))
-		.call()
-		.chatResponse();
+		.
+
+system(SystemPromptParams::fill)
+		.
+
+user(content)
+		.
+
+advisors(a ->a.
+
+advisors(chatMemoryAdvisor).
+
+param(ChatMemory.CONVERSATION_ID, conversationId))
+		.
+
+call()
+		.
+
+chatResponse();
 ```
 
 The advisor loads the remembered messages and puts them before the new one. It saves the user message **before** the call and
@@ -1087,13 +1101,13 @@ assigned by the application, so `@Version` (null means insert) tells a new row f
 
 **Pitfalls found on the way:**
 
-| Pitfall                                                                  | What happens                                                                  | Here                                                                  |
-|--------------------------------------------------------------------------|-------------------------------------------------------------------------------|-----------------------------------------------------------------------|
-| The advisor saves the user message before the call                       | a failed call leaves a question without an answer; the next turn sends two user messages in a row | the service writes back the window from before the turn (`saveAll`) |
-| Oracle stores `''` as `NULL`; the memory table's `content` is `not null` | an empty reply fails to save: `ORA-01400 ... "CONTENT"`                       | same rollback, then `502`; pinned in `ConversationApiIT`              |
-| Tool-call messages                                                       | `JdbcChatMemoryRepository` drops them with a WARN (not persisted)             | no tools yet (U11)                                                    |
-| Anthropic thinking blocks                                                | only the text is stored, so replayed turns lose their thinking blocks         | accepted: Claude doesn't need them outside a tool loop                |
-| A datasource on the classpath                                            | every `@SpringBootTest` needs a database now                                  | `support.AbstractOracleIntegrationTest` (a shared Testcontainers Oracle) |
+| Pitfall                                                                  | What happens                                                                                      | Here                                                                     |
+|--------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| The advisor saves the user message before the call                       | a failed call leaves a question without an answer; the next turn sends two user messages in a row | the service writes back the window from before the turn (`saveAll`)      |
+| Oracle stores `''` as `NULL`; the memory table's `content` is `not null` | an empty reply fails to save: `ORA-01400 ... "CONTENT"`                                           | same rollback, then `502`; pinned in `ConversationApiIT`                 |
+| Tool-call messages                                                       | `JdbcChatMemoryRepository` drops them with a WARN (not persisted)                                 | no tools yet (U11)                                                       |
+| Anthropic thinking blocks                                                | only the text is stored, so replayed turns lose their thinking blocks                             | accepted: Claude doesn't need them outside a tool loop                   |
+| A datasource on the classpath                                            | every `@SpringBootTest` needs a database now                                                      | `support.AbstractOracleIntegrationTest` (a shared Testcontainers Oracle) |
 
 **Concurrency.** Turns on one conversation still run one at a time: a `ReentrantLock` taken from 64 stripes by the id's hash.
 That's bounded, with nothing to clean up, and two conversations only occasionally share a lock. The lock lives in the JVM.
@@ -1130,12 +1144,166 @@ small model ignored them. The counter kept counting (5) through the restart.
 | 502    | the chat model failed, or its reply could not be stored; the window is put back as it was before the turn |
 
 **Tests.**
+
 - `ChatMemoryTest` (6, no context): the window's eviction, its user-message start and kept system messages; the advisor's
   prompt, what it stores, the half turn on failure, the required id.
 - `ConversationApiIT` (9, Testcontainers Oracle), replacing the 9.1 turn-limit case with:
-  - window eviction over 12 turns
-  - rollback of a failed turn
-  - the empty reply on Oracle
-  - memory read back through a new repository and window (what a restart builds)
-  - the cascade on delete
+	- window eviction over 12 turns
+	- rollback of a failed turn
+	- the empty reply on Oracle
+	- memory read back through a new repository and window (what a restart builds)
+	- the cascade on delete
 - `ConversationControllerTest` is down to 9 cases (no 409), and `ConversationStoreTest` was removed with the store.
+
+## U10 — RAG Foundations & Basic Monitoring
+
+### 10.1 RAG pipeline overview
+
+**Retrieval-augmented generation (RAG)**: the model answers from *your* documents, looked up per question, instead of from
+what it memorized in training. 8.2 already showed the second half, a prompt with documents in it; there the caller had to
+supply them. RAG adds the lookup. The `knowledge` feature is the reference flow, over the store's own knowledge: the
+catalog (spring-boot-training's product rows) and four bundled policy documents (`src/main/resources/knowledge/*.md`).
+
+**Two phases:**
+
+```text
+INGESTION (offline, POST /api/v1/knowledge/ingestions)
+  catalog rows ─┐                                  EmbeddingModel                       VectorStore
+                ├─> Document(text, metadata, id) ─> (Ollama, qwen3-embedding:0.6b) ─> (Oracle, knowledge_vector)
+  *.md files ───┘                                  text -> float[1024]                  id | content | metadata | embedding
+
+ANSWERING (per question, POST /api/v1/knowledge/answers)
+  1 query       "Which laptop for 3D rendering?"
+  2 retrieval   embed the question (same model) -> VECTOR_DISTANCE(embedding, ?, COSINE) -> top-k nearest documents
+  3 context     prompts/knowledge/question-answer.st: instructions + <documents>their text</documents> + <question>
+  4 generation  ChatClient (system prompt first, as always) -> answer citing [catalog:LAP-0002], [doc:warranty]
+```
+
+Steps 2 and 3 are one `Advisor`, `QuestionAnswerAdvisor` (`config.ai.RagConfig`). The service only adds it to the call:
+
+```java
+chatClient.prompt()
+		.
+
+system(SystemPromptParams::fill)
+		.
+
+user(request.question())
+		.
+
+advisors(questionAnswerAdvisor)
+		.
+
+call()
+		.
+
+chatResponse();
+```
+
+After the call, the advisor puts the retrieved documents in the response metadata (`RETRIEVED_DOCUMENTS`). The API returns
+them as `sources`, with their similarity. As with the chat memory advisor (9.2), it is added per call, not as a default
+advisor: otherwise every chat call would search the store and answer only from it.
+
+| Piece            | Here                                                                     | Set by                                                                  |
+|------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| `EmbeddingModel` | Ollama `qwen3-embedding:0.6b` (1024 dimensions), for both chat providers | `spring.ai.model.embedding: ollama`, `spring.ai.ollama.embedding.model` |
+| `VectorStore`    | `OracleVectorStore`, table `knowledge_vector`, COSINE, IVF index         | `spring.ai.vectorstore.oracle.*`, `V2__create_knowledge_vector.sql`     |
+| Retrieval        | top-k 4, no similarity threshold                                         | `app.ai.retrieval.*` (`RetrievalProperties`)                            |
+| Context template | `prompts/knowledge/question-answer.st`                                   | `RagConfig`                                                             |
+
+**Choosing the embedding model.** Anthropic has no embeddings API, so embeddings come from Ollama whichever chat
+provider is active: RAG needs the Ollama server even under the `anthropic` profile. I ran three candidates on a small probe:
+6 questions against 6 catalog and policy texts, one of them in Greek.
+
+| Model                  | Size    | Dimensions | Right first hit                                                                       |
+|------------------------|---------|------------|---------------------------------------------------------------------------------------|
+| `qwen3-embedding:0.6b` | ~640 MB | 1024       | 6/6                                                                                   |
+| `embeddinggemma`       | ~620 MB | 768        | 5/6                                                                                   |
+| `nomic-embed-text`     | ~270 MB | 768        | 4/6 (run without its `search_query:` / `search_document:` prefixes, which it expects) |
+
+The dimension is fixed three times over: by the model's output, by `spring.ai.vectorstore.oracle.dimensions`, and by the
+table's `vector(1024, FLOAT64)` column. Changing the model means a new migration and re-ingesting everything, because vectors
+from two models can't be compared.
+
+**Ingestion** (`KnowledgeIngestionService`) is a full rebuild. It deletes both sources' documents, then calls
+`vectorStore.add(...)`, which embeds in batches and `MERGE`s the rows. Ids are name-based UUIDs of the SKU or file name, so
+running it twice replaces rows instead of duplicating them. The embedding calls go to Ollama, so there's no transaction around
+it.
+
+- **Catalog:** `CatalogDocumentReader` reads `training.product` and `training.category` through a read-only grant
+  (`compose/oracle-startdb/02_ai_training_catalog_read.sql`). It skips the 500 generated `GEN-*` demo rows: they all share one
+  placeholder text and would crowd every search.
+- **Documents:** `BundledDocumentReader` turns each `.md` file into one document, whole. Splitting them is 10.2.
+
+**Only the text reaches the model.** The advisor joins the retrieved documents' *text*; their metadata stays behind (pinned in
+`RagTest`). So the citation tag and every fact worth asking about are written into the text at ingestion:
+
+```text
+[catalog:LAP-0002] Latitude 16 Workstation. Category: Laptops. Price: 2199.00 EUR. 16" mobile workstation, 32 GB RAM, 1 TB SSD, discrete GPU
+[doc:warranty] # Warranty ...
+```
+
+**Live** (`local` profile, `qwen3.5:4b` + `qwen3-embedding:0.6b`, port 8081). Ingestion embedded 24 catalog products and 4
+documents in 8 s. Then four questions:
+
+| Question                                                                                  | Retrieved (similarity)                                            | Answer                                                                                       |
+|-------------------------------------------------------------------------------------------|-------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| Which laptop should I buy for 3D rendering, and how long is its warranty?                 | laptop-buying-guide .57, warranty .54, LAP-0002 .53, LAP-0001 .50 | Latitude 16 Workstation (discrete GPU, 32 GB), 2 years, battery 1 year; cites all three      |
+| Can I return earbuds I already opened?                                                    | returns-policy .70, AUD-0002 .46, AUD-0001 .42, AUD-0003 .41      | No, only unopened, for hygiene; faulty ones go through the warranty                          |
+| Πόσο κοστίζει η express αποστολή στη Θεσσαλονίκη; (express shipping cost to Thessaloniki) | shipping .31, STO-0003 .30, STO-0002 .28, STO-0001 .28            | 9.90 EUR, right, but in English, and it misread "delivered before 12:00" as an order cut-off |
+| Do you sell gaming consoles?                                                              | ACC-0003 .33, AUD-0003 .30, ACC-0004 .30, LAP-0003 .29            | "The store's information does not mention gaming consoles"                                   |
+
+What the numbers show:
+
+- The first question needed three documents: the guide says *which* laptop, the catalog row says it *is* the one, the
+  warranty says *how long*. That's why retrieval returns more than one document.
+- Relevant documents score about 0.5 to 0.7. The unanswerable question's best was 0.33. A threshold near 0.4 would have
+  sent the model nothing for it, and saved about 500 prompt tokens. But the Greek question's right document also scored only
+  0.31, so a threshold would have cut it too. Tuning that trade-off is 10.2.
+- Top-k always fills up: even for the consoles question the model got 4 unrelated products. The instruction "say it isn't
+  covered, don't guess" is what kept the answer honest.
+- The prompt costs grow with retrieval: 500 to 970 prompt tokens here, against about 170 for a plain chat turn.
+
+**Pitfalls found on the way (Spring AI 2.0.1):**
+
+| Pitfall                                                                                                                 | Here                                                                            |
+|-------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| The advisor artifact is `spring-ai-vector-store-advisor` in 2.0.1, not `spring-ai-advisors-vector-store` (older docs)   | the pom uses the 2.0.1 name                                                     |
+| `spring-ai-starter-vector-store-oracle` pulls `ojdbc11` + UCP next to our `ojdbc17`                                     | excluded in the pom                                                             |
+| Metadata read back from Oracle's JSON column holds driver JSON values: `ref` came back as `"LAP-0002"`, quotes included | `KnowledgeService.text(...)` parses the value; caught by `KnowledgeApiIT`       |
+| A `SearchRequest` with any similarity threshold fails at runtime unless `forced-normalization` is on                    | `forced-normalization: true`, threshold 0 for now                               |
+| `QuestionAnswerAdvisor` and `SimpleLoggerAdvisor` both default to order 0                                               | explicit order in `RagConfig`, before the logger and after chat memory          |
+| Oracle returns `number(12,2)` 2199.00 as `2199`                                                                         | the reader formats prices with two decimals                                     |
+| Top-k with no threshold always returns k documents, relevant or not                                                     | the template tells the model to say when the documents don't cover the question |
+
+| Status | When                                                                                 |
+|--------|--------------------------------------------------------------------------------------|
+| 200    | ingestion counts, or an answer with its sources                                      |
+| 400    | a blank or oversized question (over 1,000 characters), or an unsupported API version |
+| 502    | the embedding model, the vector store, or the chat model failed                      |
+
+**Setup:** `docker compose --profile ai up -d` pulls `qwen3-embedding:0.6b` along with the chat model. Then:
+
+```bash
+./mvnw -pl spring-ai-training flyway:migrate                     # V2 knowledge_vector
+docker compose restart oracle                                    # only if the catalog tables were created after Oracle's last start
+curl -X POST localhost:8080/api/v1/knowledge/ingestions
+curl -X POST localhost:8080/api/v1/knowledge/answers -H 'Content-Type: application/json' \
+  -d '{"question": "Which laptop should I buy for 3D rendering, and how long is its warranty?"}'
+```
+
+The restart re-runs the grant: `02_ai_training_catalog_read.sql` skips it while the tables don't exist.
+
+**Tests.**
+
+- `RagTest` (4, no context): the advisor sends text but never metadata, returns the retrieved documents in the metadata, and
+  respects top-k; its default order ties with the logger.
+- `KnowledgeDocumentsTest` (3): document text and tags, stable ids, the bundled files.
+- `KnowledgeControllerTest` (6, `@WebMvcTest`).
+- `KnowledgeApiIT` (5, Testcontainers Oracle, the real `knowledge_vector` table, a hashing stub embedding model, an `@Sql`
+  catalog fixture):
+	- ingestion counts, with the demo rows skipped
+	- re-ingestion doesn't duplicate
+	- the prompt's shape: system prompt, then context with the tag, question last
+	- top-k bounds the context
+	- an empty store still answers, with no sources

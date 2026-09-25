@@ -69,8 +69,9 @@ services:
       start_period: 10s
 
   ollama-pull:
-    # One-shot: pulls the chat model once the server is healthy, then exits. A no-op when the model is already on the volume.
-    # Keep the model in sync with spring.ai.ollama.chat.model in spring-ai-training's application.yml (unit 7.2).
+    # One-shot: pulls the chat model (unit 7.2) and the embedding model (unit 10.1) once the server is healthy, then exits. A no-op
+    # for a model already on the volume. Keep both in sync with spring.ai.ollama.chat.model / spring.ai.ollama.embedding.model in
+    # spring-ai-training's application.yml.
     image: ollama/ollama:latest
     profiles: [ 'ai' ]
     environment:
@@ -97,7 +98,7 @@ services:
     entrypoint: [ "sh", "-lc" ]
     command:
       - |
-        ollama pull qwen3.5:4b
+        ollama pull qwen3.5:4b && ollama pull qwen3-embedding:0.6b
     restart: 'no'
     depends_on:
       ollama:

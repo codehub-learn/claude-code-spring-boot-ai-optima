@@ -24,3 +24,9 @@ logging:
   level:
     root: WARN
     gr.codelearn.springbootai.ai: INFO
+
+app:
+  ai:
+    knowledge:
+      # Unit 10.1: the Testcontainers user's own schema, where KnowledgeApiIT's @Sql fixture creates the catalog tables.
+      catalog-schema: test
