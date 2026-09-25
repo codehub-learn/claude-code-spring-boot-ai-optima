@@ -123,6 +123,17 @@ so switching providers (7.4) touches config, not feature code. `SimpleLoggerAdvi
 `application-local.yml` enables DEBUG for `org.springframework.ai.chat.client.advisor`: prompts and completions can hold user
 data, so they never reach logs at INFO outside `local`.
 
+**Thinking blocks** (a later fix, `ThinkingBlocksAdvisor`, the client's second default advisor). Claude Sonnet 5 thinks by
+default when the request sets no `thinking` option, and its thinking text is omitted by default, so a thinking block comes back
+empty. Spring AI 2.0.1's `AnthropicChatModel` turns each thinking block into its own `Generation`, *before* the answer, and
+`ChatResponse.getResult()` (what every service here, `.content()`, `.entity(...)` and the structured output validation advisor
+read) returns the first one. Result: when Claude thought first, the reply was `""` while `completionTokens` said otherwise. The
+advisor runs right outside the model call and drops those generations (recognised by the `signature` / `data` / `thinking`
+markers `AnthropicChatModel` sets on them; streamed thinking chunks are skipped). The answer's own generation still carries the
+thinking blocks for replaying the turn, and the usage metadata is untouched. Verified live: a reasoning question used 314
+thinking tokens, one thinking generation was dropped, and the answer came through; a two-turn conversation replaying that turn
+worked. On Ollama it does nothing: Ollama puts thinking in the answer's own metadata.
+
 **The endpoint.** `POST /api/v1/chat-completions`, single turn with no memory (memory is U9):
 
 ```bash
@@ -314,7 +325,7 @@ streaming, `/prompts`) sends it as the first message:
 
 @Bean
 ChatClient chatClient(ChatClient.Builder builder, @Value("classpath:prompts/chat-system.st") Resource chatSystemPrompt) {
-	return builder.defaultSystem(chatSystemPrompt).defaultAdvisors(new SimpleLoggerAdvisor()).build();
+	return builder.defaultSystem(chatSystemPrompt).defaultAdvisors(new SimpleLoggerAdvisor(), new ThinkingBlocksAdvisor()).build();
 }
 ```
 

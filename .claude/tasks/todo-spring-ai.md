@@ -468,6 +468,12 @@ own module — no code here should be required for the Spring Boot units to buil
   service here reads `response.getResult()` (the first generation), so a reply where Claude thinks first returns the thinking
   block's (empty) text. Affects chat, writing, answer, conversation (which would also store the thinking block as the assistant
   turn) and probably `.entity()`. Needs a fix and a few live Anthropic calls to verify; waiting for the user's go-ahead.
+  - **Fixed right after 9.1** (separate `fix` commit, user go-ahead): `config.ai.ThinkingBlocksAdvisor`, a second default advisor on
+    the central client (order `LOWEST_PRECEDENCE - 1`, just outside the model call), drops generations marked `signature` / `data`
+    / `thinking` (streamed chunks skipped), keeping the answer's generation (which carries the thinking for replay) and the
+    metadata. `ThinkingBlocksAdvisorTest` (6). Live on Anthropic (8 calls): a reasoning question → 314 thinking tokens, "Dropped 1
+    thinking block generation(s)", answer "12:02"; a two-turn conversation replaying that turn → correct, no 400; 3-turn chat and
+    both extraction modes correct (those didn't think: `thinking_tokens: 0`).
 - Tests: `ConversationStoreTest` (2), `ConversationControllerTest` (10), `ConversationApiIT` (6).
 - README: new U9 heading, 9.1 section (the three styles side by side, the resource, how a turn works, the store's limits, live
   run, trade-off table, statuses).

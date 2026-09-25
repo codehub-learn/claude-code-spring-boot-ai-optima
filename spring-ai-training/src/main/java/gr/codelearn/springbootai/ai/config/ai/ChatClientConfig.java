@@ -34,6 +34,9 @@ import org.springframework.core.io.Resource;
  * <p>Unit 7.4: which {@code ChatModel} is underneath is decided by {@link AiProperties} ({@code app.ai.chat-provider}), never by code
  * here. The properties come first in the parameter list so a bad value fails their validation before the builder's {@code ChatModel}
  * lookup can fail with a less helpful error. The startup log names the provider and model actually in use.
+ *
+ * <p>{@link ThinkingBlocksAdvisor} is a default advisor too: without it, a reply where Claude thought first reaches every caller as the
+ * (empty) thinking block instead of the answer.
  */
 @Configuration
 class ChatClientConfig {
@@ -44,6 +47,6 @@ class ChatClientConfig {
 	ChatClient chatClient(final AiProperties aiProperties, final ChatClient.Builder builder, final ChatModel chatModel,
 						  @Value("classpath:prompts/chat-system.st") final Resource chatSystemPrompt) {
 		log.info("Chat model: provider={}, model={}", aiProperties.chatProvider(), chatModel.getDefaultOptions().getModel());
-		return builder.defaultSystem(chatSystemPrompt).defaultAdvisors(new SimpleLoggerAdvisor()).build();
+		return builder.defaultSystem(chatSystemPrompt).defaultAdvisors(new SimpleLoggerAdvisor(), new ThinkingBlocksAdvisor()).build();
 	}
 }
