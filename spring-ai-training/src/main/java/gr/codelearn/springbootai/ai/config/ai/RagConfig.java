@@ -33,6 +33,8 @@ import org.springframework.core.io.Resource;
  * <p>A bean, not a default advisor of the central {@code ChatClient}: every call would then search the store and answer only from it.
  * {@code knowledge.KnowledgeService} adds it per call. Its order is set explicitly: the default (0) ties with {@code SimpleLoggerAdvisor},
  * and this one must run first so the debug log shows the augmented prompt. It still runs after the chat memory advisor.
+ *
+ * <p>Unit 10.3: {@link RagLoggingAdvisor}, the stage logger added next to it, one step inside.
  */
 @Configuration
 class RagConfig {
@@ -53,5 +55,10 @@ class RagConfig {
 									.promptTemplate(new PromptTemplate(template))
 									.order(ORDER)
 									.build();
+	}
+
+	@Bean
+	RagLoggingAdvisor ragLoggingAdvisor() {
+		return new RagLoggingAdvisor();
 	}
 }

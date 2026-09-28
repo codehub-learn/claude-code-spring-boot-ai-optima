@@ -1408,3 +1408,110 @@ instructions. The template now describes the tag format without an example, and 
   `markdown` chunks, the evaluation response.
 - `KnowledgeControllerTest` (8): the new response shapes and `top-k` validation.
 - `KnowledgeDocumentsTest` (3).
+
+### 10.3 Logging
+
+**Goal.** See what each RAG stage did (what was retrieved, how well it matched, what the context cost, how long the model took)
+without ever writing a user's question, a document chunk or an answer into the logs outside local development.
+
+**Two kinds of log, two rules.**
+
+| Logger                                  | What it writes                                            | When it is on                        |
+|-----------------------------------------|-----------------------------------------------------------|--------------------------------------|
+| `SimpleLoggerAdvisor` (6.2)             | whole prompts and completions: user data                  | DEBUG, `application-local.yml` only  |
+| `RagLoggingAdvisor`, ingestion (10.3)   | counts, ids, sections, scores, token sizes, times; **no text** | DEBUG, on under `local` (package logger), off by default and in tests |
+
+CLAUDE.md's rule is "no full prompts or completions at INFO outside local". The stage events go one step further: they carry no
+content at all, so even a DEBUG switch in another environment leaks nothing but document names and numbers.
+
+**Where it hooks in.** `config.ai.RagLoggingAdvisor` is a `CallAdvisor` added per call next to the `QuestionAnswerAdvisor`
+(`KnowledgeService`), ordered one step inside it (`RagConfig.ORDER + 1`):
+
+```text
+request → ... → QuestionAnswerAdvisor.before  (search, context in the prompt, documents in the request context)
+              → RagLoggingAdvisor              (log retrieval + hits, start the clock)
+              → ... → model
+              ← RagLoggingAdvisor              (log generation: time, tokens) or (log generation-failed, rethrow)
+```
+
+Inside the retrieval advisor, it reads the retrieved documents from the request context (`RETRIEVED_DOCUMENTS`) and times the
+model call alone. The retrieval line is written *before* the model is called, so it is there when generation fails. What it
+doesn't measure is the vector search time: that is a span in 10.4. With DEBUG off, the advisor passes the call through without
+counting anything.
+
+**Structured events.** Each line is one SLF4J event with key-value pairs (`log.atDebug().addKeyValue(...)`). The message repeats
+the values, because the local console is plain text and Boot's pattern layout does not print key-values. Under structured
+logging (the default outside `local`, `logging.structured.format.console: ecs`), Boot writes them as fields, and a dotted key
+becomes a nested object:
+
+| `rag.stage`         | Fields                                                                   | Where                    |
+|---------------------|--------------------------------------------------------------------------|--------------------------|
+| `chunking`          | `ref`, `chunking`, `chunks`, `min_tokens`, `max_tokens`                   | ingestion, per document and strategy |
+| `retrieval`         | `hits`, `top_similarity`, `context_tokens`, `filter`                     | answers, before the model |
+| `hit`               | `rank`, `source`, `ref`, `section`, `chunk` (e.g. `markdown 8/17`), `similarity`, `tokens` | one per retrieved chunk |
+| `generation`        | `duration_ms`, `prompt_tokens`, `completion_tokens`, `answer_chars`, `model` | answers, after the model |
+| `generation-failed` | `duration_ms`, `error` (the exception type)                              | the model call threw     |
+
+Token sizes are JTokkit estimates (`cl100k`), not the chat model's own tokenizer: good for comparing chunks, not for billing.
+The model's real counts are `prompt_tokens` / `completion_tokens`.
+
+**Live** (Ollama on the GPU, `local` profile, port 8081, startup line `provider=OLLAMA`). Ingestion:
+
+```text
+DEBUG KnowledgeIngestionService : Chunked product-care-guide with whole: 1 chunks, 1425-1425 tokens each
+DEBUG KnowledgeIngestionService : Chunked product-care-guide with token: 8 chunks, 101-219 tokens each
+DEBUG KnowledgeIngestionService : Chunked product-care-guide with markdown: 17 chunks, 65-132 tokens each
+ INFO KnowledgeIngestionService : Ingested 24 catalog rows and 8 bundled documents as {whole=8, token=33, markdown=50} chunks in 48181 ms
+```
+
+"Can I return opened earbuds?" (answered correctly, "only if faulty, under the warranty"):
+
+```text
+DEBUG RagLoggingAdvisor : RAG retrieval: 4 hits, top similarity 0.70, context ~486 tokens (filter: chunking in ['none', 'markdown'])
+DEBUG RagLoggingAdvisor : RAG hit 1: doc:returns-policy > Returns policy [markdown 1/1], similarity 0.70, 199 tokens
+DEBUG RagLoggingAdvisor : RAG hit 2: doc:trade-in-and-recycling > Which devices qualify for trade-in [markdown 2/8], similarity 0.48, 118 tokens
+DEBUG RagLoggingAdvisor : RAG hit 3: catalog:AUD-0002 [none], similarity 0.45, 38 tokens
+DEBUG RagLoggingAdvisor : RAG hit 4: doc:product-care-guide > Pairing problems [markdown 8/17], similarity 0.44, 131 tokens
+DEBUG RagLoggingAdvisor : RAG generation: 56512 ms, 795 prompt + 55 completion tokens, answer 258 chars, model qwen3.5:4b
+```
+
+"Do you sell gaming consoles?" (not in the store; answered "the documents don't say"):
+
+```text
+DEBUG RagLoggingAdvisor : RAG retrieval: 4 hits, top similarity 0.34, context ~407 tokens (filter: chunking in ['none', 'markdown'])
+DEBUG RagLoggingAdvisor : RAG hit 1: doc:trade-in-and-recycling > Which devices qualify for trade-in [markdown 2/8], similarity 0.34, 118 tokens
+...
+DEBUG RagLoggingAdvisor : RAG generation: 1718 ms, 723 prompt + 37 completion tokens, answer 178 chars, model qwen3.5:4b
+```
+
+The same retrieval event under `--logging.structured.format.console=ecs` (shortened):
+
+```json
+{"log":{"level":"DEBUG","logger":"gr.codelearn.springbootai.ai.config.ai.RagLoggingAdvisor"},
+ "message":"RAG retrieval: 4 hits, top similarity 0.70, context ~486 tokens (filter: chunking in ['none', 'markdown'])",
+ "rag":{"stage":"retrieval","hits":4,"top_similarity":0.7,"context_tokens":486,"filter":"chunking in ['none', 'markdown']"}}
+```
+
+What the logs show at a glance:
+- **The answerable and unanswerable questions differ by the top similarity** (0.70 against 0.34), the signal 10.2's threshold
+  discussion is built on, now visible per request.
+- **Retrieval padding.** top-k 4 always returns 4 chunks: the earbuds question pulled in trade-in and pairing sections that
+  don't help, ~250 of its 486 context tokens.
+- **The first call's 56 s is Ollama loading the model** onto the GPU after the container start. The next call took 1.7 s.
+  Ingestion's 48 s is the embedding model, cold, embedding 115 rows.
+- **Context is not the prompt.** 486 context tokens became 795 prompt tokens: the system prompt and the RAG template add the rest, and Qwen's tokenizer counts differently from
+  the `cl100k` estimate.
+
+**Pitfalls:**
+
+| Pitfall                                                                    | Here                                                              |
+|----------------------------------------------------------------------------|-------------------------------------------------------------------|
+| An advisor ordered *before* `QuestionAnswerAdvisor` sees no retrieved documents yet | `RagConfig.ORDER + 1`, pinned in `RagLoggingAdvisorTest`     |
+| Key-values don't show in the plain-text console                            | the message carries the same values                               |
+| Metadata read back from Oracle holds driver JSON values (`"LAP-0002"` with quotes) | `config.ai.VectorStoreMetadata.text`, now shared by the service, the evaluation and the advisor |
+| `%.2f` follows the JVM locale (`0,70` on a Greek machine)                  | `Locale.ROOT`                                                     |
+| Logging the question "just at DEBUG" still ships it wherever DEBUG gets switched on | content only through `SimpleLoggerAdvisor`, local only       |
+
+**Tests.** `RagLoggingAdvisorTest` (6, a real `QuestionAnswerAdvisor` over an in-memory store, stub chat model, Logback
+`ListAppender`): the four stage events and their key-values at DEBUG, no question / chunk text / answer in any message or value,
+nothing at INFO, an empty retrieval, a failed generation logged after the retrieval and rethrown, the order.

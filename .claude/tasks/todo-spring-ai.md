@@ -94,7 +94,7 @@ own module — no code here should be required for the Spring Boot units to buil
   slice using `QuestionAnswerAdvisor`, documented as the reference flow.
 - [x] **10.2 Chunking strategies** — a document ingestion step (`TokenTextSplitter` or similar),
   comparing at least two chunking configs and their effect on retrieval quality.
-- [ ] **10.3 Logging** — structured logging around the RAG pipeline stages (retrieval hits, chunk
+- [x] **10.3 Logging** — structured logging around the RAG pipeline stages (retrieval hits, chunk
   count) at DEBUG/local only, honoring the "no full prompts/completions at INFO outside local"
   rule from CLAUDE.md.
 - [ ] **10.4 Token usage monitoring** — `spring.ai.chat.observations.*` enabled, token-usage
@@ -594,3 +594,28 @@ own module — no code here should be required for the Spring Boot units to buil
 - Verified: `./mvnw -pl spring-ai-training verify` → 142 unit/slice + 37 IT, 0 failures. spring-boot-training (unchanged) passed
   in the preceding full-reactor run (75 + 66). The first full run was stopped for low memory; a second hit a transient compile
   error while the IDE was saving `KnowledgeEvaluationResponse.java`.
+
+### 10.3 Logging (done)
+
+- User decisions: a **`RagLoggingAdvisor` just inside `QuestionAnswerAdvisor`** (not two advisors, not inline in the service);
+  **SLF4J key-value pairs** (fluent `log.atDebug().addKeyValue(...)`) with the same values in the message text.
+- `config.ai.RagLoggingAdvisor` (`CallAdvisor`, order `RagConfig.ORDER + 1`, bean in `RagConfig`, added per call by
+  `KnowledgeService`): `rag.stage` = `retrieval` (hits, top similarity, context tokens by JTokkit, filter), one `hit` per chunk
+  (rank, source, ref, section, `markdown 8/17`, similarity, tokens), `generation` (ms, prompt/completion tokens, answer chars,
+  model) or `generation-failed` (ms, exception type, rethrown). Retrieval is logged before the model call. DEBUG only, a
+  pass-through when DEBUG is off; never the question, chunk text or answer (content stays with `SimpleLoggerAdvisor`, local
+  only). Retrieval latency not measured: 10.4's spans.
+- `KnowledgeIngestionService`: a DEBUG `chunking` event per document and strategy (chunks, min/max tokens).
+- Refactor: `KnowledgeService.text` (Oracle JSON metadata unwrapping) moved to the public `config.ai.VectorStoreMetadata`, now
+  used by the service, the evaluation and the advisor.
+- Findings: Boot's ECS formatter nests dotted keys (`"rag":{"stage":"retrieval","hits":4,...}`); the plain-text console pattern
+  drops key-values (hence the values in the message); `%.2f` follows the JVM locale, so `Locale.ROOT`.
+- Live on Ollama (`local`, GPU, port 8081, startup line `provider=OLLAMA`): ingestion 24 + 8 → whole 8 / token 33 / markdown 50
+  with per-document chunk sizes; opened earbuds: top similarity 0.70, 4 hits, ~486 context → 795 prompt tokens, 56.5 s (cold model
+  load), correct; gaming consoles: top 0.34, 1.7 s, "documents don't say". Rerun with `--logging.structured.format.console=ecs`
+  showed the nested `rag` fields. Not run: Anthropic.
+- Tests: `RagLoggingAdvisorTest` (6: stage events and key-values, no content, nothing at INFO, empty retrieval, failed
+  generation, order).
+- README: 10.3 section (two kinds of log, the hook, the event/field table, live output plain and ECS, what it shows, pitfalls).
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped → `BUILD SUCCESS` (spring-ai-training: 148 unit/slice +
+  37 IT, 0 failures; spring-boot-training 75 + 66).

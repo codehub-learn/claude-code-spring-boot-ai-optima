@@ -7,13 +7,17 @@ import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeIngestionResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.tokenizer.JTokkitTokenCountEstimator;
+import org.springframework.ai.tokenizer.TokenCountEstimator;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.IntSummaryStatistics;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Unit 10.1: step 1 of RAG, ingestion (offline, before any question): read the sources, embed every document, store text + metadata +
@@ -26,6 +30,9 @@ import java.util.Map;
  * <p>A full rebuild each time: the documents of both sources are deleted first, so a product removed from the catalog leaves the store
  * too, then everything is added again. Stable ids make it idempotent. Not transactional: the embedding calls go to Ollama and must not hold
  * a database transaction open, so a failure half way leaves a partial store until the next run.
+ *
+ * <p>Unit 10.3: at DEBUG, one structured event per document and strategy ({@code rag.stage=chunking}: chunk count, smallest and largest
+ * chunk in tokens), no text. The INFO summary carries only counts and time.
  */
 @Service
 class KnowledgeIngestionService {
@@ -36,6 +43,7 @@ class KnowledgeIngestionService {
 	private final BundledDocumentReader bundledReader;
 	private final DocumentChunker chunker;
 	private final VectorStore vectorStore;
+	private final TokenCountEstimator tokenCounter = new JTokkitTokenCountEstimator();
 
 	KnowledgeIngestionService(final CatalogDocumentReader catalogReader, final BundledDocumentReader bundledReader,
 							  final DocumentChunker chunker, final VectorStore vectorStore) {
@@ -51,7 +59,12 @@ class KnowledgeIngestionService {
 		final List<Document> rows = new ArrayList<>(catalog);
 		final Map<String, Integer> chunksByStrategy = new LinkedHashMap<>();
 		for (final ChunkingStrategy strategy : ChunkingStrategy.values()) {
-			final List<Document> chunks = bundled.stream().flatMap(document -> chunker.chunk(document, strategy).stream()).toList();
+			final List<Document> chunks = new ArrayList<>();
+			for (final BundledDocument document : bundled) {
+				final List<Document> documentChunks = chunker.chunk(document, strategy);
+				logChunks(document, strategy, documentChunks);
+				chunks.addAll(documentChunks);
+			}
 			chunksByStrategy.put(strategy.key(), chunks.size());
 			rows.addAll(chunks);
 		}
@@ -66,5 +79,24 @@ class KnowledgeIngestionService {
 		log.info("Ingested {} catalog rows and {} bundled documents as {} chunks in {} ms", catalog.size(), bundled.size(),
 				 chunksByStrategy, millis);
 		return new KnowledgeIngestionResponse(catalog.size(), bundled.size(), chunksByStrategy, rows.size(), millis);
+	}
+
+	private void logChunks(final BundledDocument document, final ChunkingStrategy strategy, final List<Document> chunks) {
+		if (!log.isDebugEnabled()) {
+			return;
+		}
+		final IntSummaryStatistics tokens =
+				chunks.stream()
+					  .mapToInt(chunk -> tokenCounter.estimate(Objects.requireNonNullElse(chunk.getText(), "")))
+					  .summaryStatistics();
+		log.atDebug()
+		   .addKeyValue("rag.stage", "chunking")
+		   .addKeyValue("rag.ref", document.name())
+		   .addKeyValue("rag.chunking", strategy.key())
+		   .addKeyValue("rag.chunks", chunks.size())
+		   .addKeyValue("rag.min_tokens", tokens.getMin())
+		   .addKeyValue("rag.max_tokens", tokens.getMax())
+		   .log("Chunked {} with {}: {} chunks, {}-{} tokens each", document.name(), strategy.key(), chunks.size(), tokens.getMin(),
+				tokens.getMax());
 	}
 }

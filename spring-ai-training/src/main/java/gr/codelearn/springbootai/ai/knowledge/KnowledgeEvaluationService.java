@@ -1,6 +1,7 @@
 package gr.codelearn.springbootai.ai.knowledge;
 
 import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
+import gr.codelearn.springbootai.ai.config.ai.VectorStoreMetadata;
 import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeEvaluationResponse;
 import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeEvaluationResponse.QuestionResult;
 import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeEvaluationResponse.StrategyResult;
@@ -89,10 +90,10 @@ class KnowledgeEvaluationService {
 			}
 			strategies.add(new StrategyResult(strategy.key(), rows(strategy), share(ranks, rank -> rank == 1),
 											  share(ranks, rank -> rank > 0),
-			                                  round(ranks.stream().mapToDouble(rank -> rank == 0 ? 0 : 1d / rank).average()),
+											  round(ranks.stream().mapToDouble(rank -> rank == 0 ? 0 : 1d / rank).average()),
 											  round(hitSimilarities.stream().mapToDouble(Double::doubleValue).average()),
 											  round(hitSimilarities.stream().mapToDouble(Double::doubleValue).min()),
-			                                  round(maxUnanswerable),
+											  round(maxUnanswerable),
 											  (int) Math.round(contextTokens.stream().mapToInt(Integer::intValue).average().orElse(0))));
 		}
 		final List<QuestionResult> details = questions.stream()
@@ -123,7 +124,7 @@ class KnowledgeEvaluationService {
 		for (int index = 0; index < retrieved.size(); index++) {
 			final Document document = retrieved.get(index);
 			final boolean fromExpected = String.valueOf(question.expectedRef())
-											   .equals(KnowledgeService.text(document.getMetadata().get("ref")));
+											   .equals(VectorStoreMetadata.text(document.getMetadata().get("ref")));
 			if (fromExpected && normalise(String.valueOf(document.getText())).contains(answer)) {
 				return index + 1;
 			}

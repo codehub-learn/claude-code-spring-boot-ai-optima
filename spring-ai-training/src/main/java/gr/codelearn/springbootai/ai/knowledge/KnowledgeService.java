@@ -1,13 +1,13 @@
 package gr.codelearn.springbootai.ai.knowledge;
 
 import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
+import gr.codelearn.springbootai.ai.config.ai.RagLoggingAdvisor;
 import gr.codelearn.springbootai.ai.config.ai.SystemPromptParams;
 import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeAnswerRequest;
 import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeAnswerResponse;
 import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeAnswerResponse.Source;
 import gr.codelearn.springbootai.ai.knowledge.dto.KnowledgeAnswerResponse.TokenUsage;
 
-import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -15,11 +15,12 @@ import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import static gr.codelearn.springbootai.ai.config.ai.VectorStoreMetadata.text;
 
 /**
  * Unit 10.1: step 2 of RAG, answering: the reference flow.
@@ -37,22 +38,25 @@ import java.util.Objects;
  * <p>Nothing in this class searches or builds the context: it adds the advisor for this call only (see {@code config.ai.RagConfig}).
  * Unit 10.2: with a filter, passed per call ({@link QuestionAnswerAdvisor#FILTER_EXPRESSION}), so retrieval only sees the active chunking
  * strategy's chunks and the catalog rows ({@code app.ai.knowledge.chunking.active}).
+ *
+ * <p>Unit 10.3: a {@link RagLoggingAdvisor} rides along, just inside the retrieval advisor, and logs each stage at DEBUG (hits, scores,
+ * context size, generation time and tokens).
  */
 @Service
 class KnowledgeService {
-
-	private static final JsonMapper JSON = JsonMapper.shared();
 
 	private static final String UNAVAILABLE = "The chat or embedding model is unavailable, try again later";
 
 	private final ChatClient chatClient;
 	private final QuestionAnswerAdvisor questionAnswerAdvisor;
+	private final RagLoggingAdvisor ragLoggingAdvisor;
 	private final KnowledgeProperties properties;
 
 	KnowledgeService(final ChatClient chatClient, final QuestionAnswerAdvisor questionAnswerAdvisor,
-					 final KnowledgeProperties properties) {
+					 final RagLoggingAdvisor ragLoggingAdvisor, final KnowledgeProperties properties) {
 		this.chatClient = chatClient;
 		this.questionAnswerAdvisor = questionAnswerAdvisor;
+		this.ragLoggingAdvisor = ragLoggingAdvisor;
 		this.properties = properties;
 	}
 
@@ -62,7 +66,7 @@ class KnowledgeService {
 			response = chatClient.prompt()
 								 .system(SystemPromptParams::fill)
 								 .user(request.question())
-								 .advisors(advisors -> advisors.advisors(questionAnswerAdvisor)
+								 .advisors(advisors -> advisors.advisors(questionAnswerAdvisor, ragLoggingAdvisor)
 															   .param(QuestionAnswerAdvisor.FILTER_EXPRESSION,
 																	  properties.chunking().active().filterExpression()))
 								 .call()
@@ -93,17 +97,5 @@ class KnowledgeService {
 		final Object section = metadata.get("section");
 		return new Source(text(metadata.get("source")), text(metadata.get("ref")), text(metadata.get("title")),
 						  section == null ? null : text(section), document.getScore());
-	}
-
-	/**
-	 * A metadata value as plain text. OracleVectorStore (2.0.1) hands back the driver's JSON values ({@code OracleJsonString}), whose
-	 * {@code toString()} is the JSON text: {@code "LAP-0002"} with the quotes. Parsed as JSON, it is the string again.
-	 */
-	static String text(final @Nullable Object value) {
-		if (value == null || value instanceof String) {
-			return Objects.requireNonNullElse((String) value, "");
-		}
-		final String json = value.toString();
-		return json.startsWith("\"") ? JSON.readValue(json, String.class) : json;
 	}
 }
