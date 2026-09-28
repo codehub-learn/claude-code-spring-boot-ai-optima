@@ -1,0 +1,236 @@
+{
+	"uid": "spring-ai-token-usage",
+	"title": "Spring AI - token usage and latency",
+	"description": "Unit 10.4: spring-ai-training's model calls from Spring AI's observations (gen_ai.client.token.usage, gen_ai.client.operation, db.vector.client.operation), exported over OTLP.",
+	"tags": [
+		"spring-ai",
+		"training"
+	],
+	"timezone": "browser",
+	"schemaVersion": 39,
+	"version": 1,
+	"editable": true,
+	"refresh": "10s",
+	"time": {
+		"from": "now-30m",
+		"to": "now"
+	},
+	"panels": [
+		{
+			"id": 1,
+			"type": "stat",
+			"title": "Tokens in range, by operation and type",
+			"gridPos": {
+				"x": 0,
+				"y": 0,
+				"w": 24,
+				"h": 5
+			},
+			"datasource": {
+				"type": "prometheus",
+				"uid": "prometheus"
+			},
+			"options": {
+				"reduceOptions": {
+					"calcs": [
+						"lastNotNull"
+					]
+				},
+				"textMode": "value_and_name",
+				"colorMode": "none"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"decimals": 0
+				},
+				"overrides": []
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "sum by (gen_ai_operation_name, gen_ai_token_type) (increase(gen_ai_client_token_usage_total{service_name=\"spring-ai-training\", gen_ai_token_type!=\"total\"}[$__range]))",
+					"legendFormat": "{{gen_ai_operation_name}} {{gen_ai_token_type}}",
+					"instant": true
+				}
+			]
+		},
+		{
+			"id": 2,
+			"type": "timeseries",
+			"title": "Tokens per minute, by model and type",
+			"description": "The provider's own counts (Ollama prompt_eval_count / eval_count, Anthropic usage). Grouped by gen_ai.response.model: the embedding observation's request model is 'none' in Spring AI 2.0.1.",
+			"gridPos": {
+				"x": 0,
+				"y": 5,
+				"w": 12,
+				"h": 9
+			},
+			"datasource": {
+				"type": "prometheus",
+				"uid": "prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"custom": {
+						"drawStyle": "bars",
+						"stacking": {
+							"mode": "normal"
+						},
+						"fillOpacity": 80
+					}
+				},
+				"overrides": []
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "sum by (gen_ai_response_model, gen_ai_token_type) (rate(gen_ai_client_token_usage_total{service_name=\"spring-ai-training\", gen_ai_token_type!=\"total\"}[$__rate_interval])) * 60",
+					"legendFormat": "{{gen_ai_response_model}} {{gen_ai_token_type}}"
+				}
+			]
+		},
+		{
+			"id": 3,
+			"type": "timeseries",
+			"title": "Average input tokens per chat call",
+			"description": "Prompt size per call: system prompt + history + retrieved context + question. RAG answers and long conversations push it up.",
+			"gridPos": {
+				"x": 12,
+				"y": 5,
+				"w": 12,
+				"h": 9
+			},
+			"datasource": {
+				"type": "prometheus",
+				"uid": "prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"unit": "short",
+					"decimals": 0
+				},
+				"overrides": []
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "sum by (gen_ai_response_model) (rate(gen_ai_client_token_usage_total{service_name=\"spring-ai-training\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"input\"}[$__rate_interval])) / sum by (gen_ai_response_model) (rate(gen_ai_client_operation_milliseconds_count{service_name=\"spring-ai-training\", gen_ai_operation_name=\"chat\"}[$__rate_interval]))",
+					"legendFormat": "{{gen_ai_response_model}} input"
+				},
+				{
+					"refId": "B",
+					"expr": "sum by (gen_ai_response_model) (rate(gen_ai_client_token_usage_total{service_name=\"spring-ai-training\", gen_ai_operation_name=\"chat\", gen_ai_token_type=\"output\"}[$__rate_interval])) / sum by (gen_ai_response_model) (rate(gen_ai_client_operation_milliseconds_count{service_name=\"spring-ai-training\", gen_ai_operation_name=\"chat\"}[$__rate_interval]))",
+					"legendFormat": "{{gen_ai_response_model}} output"
+				}
+			]
+		},
+		{
+			"id": 4,
+			"type": "timeseries",
+			"title": "Model call latency p50 / p95, by operation",
+			"gridPos": {
+				"x": 0,
+				"y": 14,
+				"w": 12,
+				"h": 9
+			},
+			"datasource": {
+				"type": "prometheus",
+				"uid": "prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"unit": "ms"
+				},
+				"overrides": []
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum by (le, gen_ai_operation_name, gen_ai_response_model) (rate(gen_ai_client_operation_milliseconds_bucket{service_name=\"spring-ai-training\"}[$__rate_interval])))",
+					"legendFormat": "p95 {{gen_ai_operation_name}} {{gen_ai_response_model}}"
+				},
+				{
+					"refId": "B",
+					"expr": "histogram_quantile(0.5, sum by (le, gen_ai_operation_name, gen_ai_response_model) (rate(gen_ai_client_operation_milliseconds_bucket{service_name=\"spring-ai-training\"}[$__rate_interval])))",
+					"legendFormat": "p50 {{gen_ai_operation_name}} {{gen_ai_response_model}}"
+				}
+			]
+		},
+		{
+			"id": 5,
+			"type": "timeseries",
+			"title": "Vector search latency p95 and model calls per minute",
+			"gridPos": {
+				"x": 12,
+				"y": 14,
+				"w": 12,
+				"h": 9
+			},
+			"datasource": {
+				"type": "prometheus",
+				"uid": "prometheus"
+			},
+			"fieldConfig": {
+				"defaults": {
+					"unit": "ms"
+				},
+				"overrides": [
+					{
+						"matcher": {
+							"id": "byFrameRefID",
+							"options": "B"
+						},
+						"properties": [
+							{
+								"id": "unit",
+								"value": "short"
+							},
+							{
+								"id": "custom.axisPlacement",
+								"value": "right"
+							}
+						]
+					}
+				]
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"expr": "histogram_quantile(0.95, sum by (le, db_system) (rate(db_vector_client_operation_milliseconds_bucket{service_name=\"spring-ai-training\", db_operation_name=\"query\"}[$__rate_interval])))",
+					"legendFormat": "p95 vector search ({{db_system}})"
+				},
+				{
+					"refId": "B",
+					"expr": "sum by (gen_ai_operation_name, error) (rate(gen_ai_client_operation_milliseconds_count{service_name=\"spring-ai-training\"}[$__rate_interval])) * 60",
+					"legendFormat": "{{gen_ai_operation_name}} calls/min (error={{error}})"
+				}
+			]
+		},
+		{
+			"id": 6,
+			"type": "table",
+			"title": "Recent RAG answers (click a trace for the span tree: embedding, Oracle query, chat)",
+			"gridPos": {
+				"x": 0,
+				"y": 23,
+				"w": 24,
+				"h": 9
+			},
+			"datasource": {
+				"type": "tempo",
+				"uid": "tempo"
+			},
+			"targets": [
+				{
+					"refId": "A",
+					"queryType": "traceql",
+					"query": "{resource.service.name=\"spring-ai-training\" && name=\"http post /api/{version}/knowledge/answers\"}",
+					"limit": 20
+				}
+			]
+		}
+	]
+}

@@ -6,6 +6,8 @@
 # The local LLM (spring-ai-training, unit 7.3) sits behind the `ai` profile, so a plain `up -d` stays Oracle-only:
 #   docker compose --profile ai up -d                                          # Oracle + Ollama, CPU
 #   docker compose -f compose.yaml -f compose.gpu.yaml --profile ai up -d      # same, on an NVIDIA GPU
+# The telemetry backend (unit 10.4) has its own profile, combinable with the others:
+#   docker compose --profile ai --profile observability up -d                  # + Grafana LGTM on :3000
 services:
   oracle:
     # Oracle Database 23ai Free, "slim" variant: no APEX / sample schemas, so the smallest image and the
@@ -128,9 +130,37 @@ services:
         reservations:
           cpus: 0.25
           memory: 512M
+  otel-lgtm:
+    # Unit 10.4: Grafana's all-in-one OpenTelemetry backend for local development: an OTLP collector in front of Prometheus (metrics),
+    # Tempo (traces) and Loki (logs), with Grafana on top. Behind its own profile so a plain `up -d` stays Oracle-only:
+    #   docker compose --profile observability up -d            (add --profile ai for Ollama)
+    # Floating tag, like the other images here.
+    image: grafana/otel-lgtm:latest
+    profiles: [ 'observability' ]
+    ports:
+      # Grafana UI (admin / admin, anonymous access on).
+      - '3000:3000'
+      # OTLP gRPC and HTTP; spring-ai-training's application-local.yml pushes to 4318.
+      - '4317:4317'
+      - '4318:4318'
+    volumes:
+      # One extra dashboard provider next to the image's own, and the dashboards it loads (token usage and latency, unit 10.4).
+      - ./compose/grafana/provisioning/dashboards/training.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/training.yaml:ro
+      - ./compose/grafana/dashboards:/var/lib/grafana/dashboards/training:ro
+    networks:
+      - observability-network
+    healthcheck:
+      # Grafana's health API; the collector and the databases start alongside it.
+      test: [ 'CMD', 'curl', '-sf', 'http://localhost:3000/api/health' ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
 networks:
   llm-network:
   db-network:
+  observability-network:
 
 volumes:
   oracle-data:

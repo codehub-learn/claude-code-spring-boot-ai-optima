@@ -20,6 +20,26 @@ management:
       exposure:
         # Everything is fair game locally; non-local profiles stay locked down (see application.yml).
         include: "*"
+  # Unit 10.4: export to the compose otel-lgtm service (`docker compose --profile observability up -d`, Grafana on :3000). Without it
+  # running the app still works; the exporters log connection warnings.
+  otlp:
+    metrics:
+      export:
+        enabled: true
+        url: http://localhost:4318/v1/metrics
+        # Push every 10 s instead of 60 s, so a demo request shows up in Grafana quickly.
+        step: 10s
+  tracing:
+    export:
+      enabled: true
+    sampling:
+      # Trace every request locally.
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://localhost:4318/v1/traces
 
 spring:
   devtools:

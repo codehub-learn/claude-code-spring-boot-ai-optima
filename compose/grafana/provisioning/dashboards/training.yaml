@@ -1,0 +1,12 @@
+# Unit 10.4: loads every dashboard JSON in compose/grafana/dashboards (mounted at /var/lib/grafana/dashboards/training) into a
+# "Training" folder. Sits next to the image's own providers in /otel-lgtm/grafana/conf/provisioning/dashboards.
+apiVersion: 1
+
+providers:
+  - name: training
+    folder: Training
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/training

@@ -47,6 +47,19 @@ spring:
         multiplier: 2
         max-interval: 5s
     chat:
+      observations:
+        # Unit 10.4: every model call is an observation (a span + the gen_ai.client.operation timer + the gen_ai.client.token.usage
+        # counter) whatever these say. They only decide whether prompt/completion *text* goes into the telemetry too: never, in any
+        # profile. SimpleLoggerAdvisor already shows content locally (CLAUDE.md: no prompts or completions outside local).
+        log-prompt: false
+        log-completion: false
+        # A failed model call's exception is logged by the observation handler (no content).
+        include-error-logging: true
+      client:
+        observations:
+          # The ChatClient's own span (spring.ai.chat.client), around the advisors: same rule, no content.
+          log-prompt: false
+          log-completion: false
       memory:
         repository:
           jdbc:
@@ -54,6 +67,9 @@ spring:
             # schema (V1__create_chat_memory.sql copies that table and adds a foreign key to conversation).
             initialize-schema: never
     vectorstore:
+      observations:
+        # Unit 10.4: the vector search span (db.vector.client.operation) without the retrieved documents' text.
+        log-query-response: false
       oracle:
         # Unit 10.1: Oracle AI Vector Search, in this module's schema. The table is Flyway's (V2__create_knowledge_vector.sql, columns
         # fixed by OracleVectorStore's SQL: id, content, metadata, embedding), so the store never creates or drops it.
@@ -139,6 +155,36 @@ management:
     build:
       # 'build' info group, from META-INF/build-info.properties written by the spring-boot:build-info goal.
       enabled: true
+  # Unit 10.4: OpenTelemetry (spring-boot-starter-opentelemetry). Metrics and traces are recorded in every profile, but exported over
+  # OTLP only where a collector is known to exist: application-local.yml turns both exports on against the compose otel-lgtm service.
+  # Elsewhere they stay off until the environment says where to send them, e.g. MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED=true +
+  # MANAGEMENT_OTLP_METRICS_EXPORT_URL, MANAGEMENT_TRACING_EXPORT_ENABLED=true + MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT.
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    export:
+      enabled: false
+    sampling:
+      # Share of requests traced. Boot's default, stated: a model call is cheap to trace but a busy service makes many.
+      probability: 0.1
+  logging:
+    export:
+      # Logs stay on stdout (ECS JSON, 10.3); OTLP log export is not wired in this unit.
+      enabled: false
+  opentelemetry:
+    resource-attributes:
+      # Attached to every metric and span. service.name comes from spring.application.name.
+      service.version: "@project.version@"
+      deployment.environment: ${spring.profiles.active:default}
+  metrics:
+    distribution:
+      percentiles-histogram:
+        # Export latency histograms (not just count/sum/max), so Grafana can draw p50/p95 per model.
+        gen_ai.client.operation: true
+        db.vector.client.operation: true
+        http.server.requests: true
 
 # Static values exposed by /actuator/info via the env contributor. The 'build' and 'git' groups are
 # contributed automatically from the files produced by the Maven build.

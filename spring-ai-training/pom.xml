@@ -35,6 +35,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- Unit 10.4: Micrometer metrics + Micrometer Tracing over OpenTelemetry, exported by OTLP (Grafana LGTM locally). Spring AI's
+		     model, embedding and vector store observations become token-usage metrics and spans through it. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-opentelemetry</artifactId>
+		</dependency>
 
 		<!-- Bean Validation (Hibernate Validator): @Valid request records at the controller boundary -->
 		<dependency>

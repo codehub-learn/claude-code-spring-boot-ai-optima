@@ -97,7 +97,7 @@ own module — no code here should be required for the Spring Boot units to buil
 - [x] **10.3 Logging** — structured logging around the RAG pipeline stages (retrieval hits, chunk
   count) at DEBUG/local only, honoring the "no full prompts/completions at INFO outside local"
   rule from CLAUDE.md.
-- [ ] **10.4 Token usage monitoring** — `spring.ai.chat.observations.*` enabled, token-usage
+- [x] **10.4 Token usage monitoring** — `spring.ai.chat.observations.*` enabled, token-usage
   metrics/spans flowing to the existing Grafana LGTM stack (reusing the Boot module's
   observability wiring where possible).
 
@@ -619,3 +619,37 @@ own module — no code here should be required for the Spring Boot units to buil
 - README: 10.3 section (two kinds of log, the hook, the event/field table, live output plain and ECS, what it shows, pitfalls).
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped → `BUILD SUCCESS` (spring-ai-training: 148 unit/slice +
   37 IT, 0 failures; spring-boot-training 75 + 66).
+
+### 10.4 Token usage monitoring (done)
+
+- Nothing to reuse: spring-boot-training has no observability wiring (the memory note claiming an `otel-lgtm` service and a
+  provisioned dashboard was stale; corrected). User decisions: a new **`grafana/otel-lgtm` compose service behind an
+  `observability` profile** plus the OTel starter in spring-ai-training only; a **provisioned dashboard**; prompt/completion
+  content capture **off in every profile**.
+- Pom: `spring-boot-starter-opentelemetry`. `application.yml`: OTLP metrics + tracing export off by default (prod enables via env
+  vars), sampling 0.1, OTLP log export off, resource attributes `service.version` / `deployment.environment`, percentile
+  histograms for `gen_ai.client.operation`, `db.vector.client.operation`, `http.server.requests`; every Spring AI content switch
+  (`spring.ai.chat.observations.log-*`, `chat.client.observations.log-*`, `vectorstore.observations.log-query-response`) false,
+  `include-error-logging: true`. `application-local.yml`: both exports on `localhost:4318`, step 10 s, sampling 1.0.
+- `compose.yaml`: `otel-lgtm` (3000, 4317, 4318, health check on Grafana's API), `compose/grafana/provisioning/dashboards/training.yaml`
+  + `compose/grafana/dashboards/spring-ai-token-usage.json` (tokens in range, tokens/min by model and type, avg tokens per chat
+  call, model latency p50/p95, vector search p95 + calls/min by error, a Tempo TraceQL table of RAG answers).
+- **Found live, fixed:** the vector search span carried the question (`db.vector.query.content`) with every content property off.
+  `config.ai.ObservabilityConfig` registers an `ObservationFilter` dropping it in every profile; the IT for it fails without the
+  filter (checked by disabling it once).
+- Other findings (2.0.1): the first vector search per process embeds "Hello World" (the search observation asks
+  `AbstractEmbeddingModel.dimensions()`, unknown for qwen3-embedding), counted as tokens and 6.5 s on a cold model; the embedding
+  observation's `gen_ai.request.model` is `none` (dashboards group by response model); Prometheus names
+  `gen_ai_client_token_usage_total`, `*_milliseconds_bucket`; `percentiles-histogram` matches `...operation.active` by prefix;
+  Grafana's file provider skipped a dashboard directory created after startup (fine after a restart); protobuf prints
+  `sun.misc.Unsafe` warnings on Java 25.
+- Live (Ollama GPU, `local`, port 8081, `provider=OLLAMA`): metrics in Prometheus, traces in Tempo; a RAG trace shows
+  `http post` > `chat_client` > advisors > `embedding` (probe) + `oracle query` (> `embedding` of the question) + `chat qwen3.5:4b`
+  (795 in / 102 out). Chat p95 ~1.8 s, embedding ~50 ms, vector search ~67 ms, ~790 input tokens per chat call. Every dashboard
+  query checked against Prometheus / Tempo; local log lines carry `[traceId-spanId]`. Not run: Anthropic.
+- Tests: `TokenUsageMetricsIT` (3: exact chat token counts + tags, a RAG answer's embedding/search/chat, no observation holds the
+  question), real Ollama models against a JDK `HttpServer` stub.
+- README: 10.4 section (what is recorded, wiring, the content filter, run, Prometheus names, dashboard table, live trace and
+  numbers, pitfalls, tests).
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped → `BUILD SUCCESS` (spring-ai-training: 148 unit/slice + 40
+  IT, 0 failures; spring-boot-training 75 + 66), no OTLP export attempt in the test logs.

@@ -1515,3 +1515,100 @@ What the logs show at a glance:
 **Tests.** `RagLoggingAdvisorTest` (6, a real `QuestionAnswerAdvisor` over an in-memory store, stub chat model, Logback
 `ListAppender`): the four stage events and their key-values at DEBUG, no question / chunk text / answer in any message or value,
 nothing at INFO, an empty retrieval, a failed generation logged after the retrieval and rethrown, the order.
+
+### 10.4 Token usage monitoring
+
+**Goal.** Know what the model calls cost (tokens in and out, per model), how long they take, and follow one slow request from
+the HTTP call down to the embedding, the Oracle search and the model, in Grafana. None of it needs code in the features:
+Spring AI observes its own calls.
+
+**What Spring AI records** (2.0.1, whenever an `ObservationRegistry` exists, which the OpenTelemetry starter provides):
+
+| Observation                      | Span name (example)                  | Metrics                                                            |
+|----------------------------------|--------------------------------------|--------------------------------------------------------------------|
+| model call (`ChatModel`)         | `chat qwen3.5:4b`                    | `gen_ai.client.operation` timer, `gen_ai.client.token.usage` counter (input / output / total) |
+| embedding (`EmbeddingModel`)     | `embedding`                          | same two, `gen_ai.operation.name=embedding`                        |
+| vector search (`VectorStore`)    | `oracle query`                       | `db.vector.client.operation` timer                                 |
+| `ChatClient` and each advisor    | `spring_ai chat_client`, `question_answer`, `rag_logging`, ... | `spring.ai.chat.client`, `spring.ai.advisor` timers |
+
+Token counts are the provider's own (`prompt_eval_count` / `eval_count` from Ollama, `usage` from Anthropic), not estimates.
+Metric tags are low-cardinality only: `gen_ai.system` (ollama, anthropic), `gen_ai.operation.name`, `gen_ai.request.model`,
+`gen_ai.response.model`, `gen_ai.token.type`. The token counts per call are also span attributes (`gen_ai.usage.*_tokens`).
+
+**Wiring.**
+- `spring-boot-starter-opentelemetry`: Micrometer metrics, Micrometer Tracing over the OpenTelemetry SDK, OTLP export.
+- `application.yml`: recording on everywhere, **export off** by default (a prod environment turns it on and points it at its
+  collector with environment variables, never a committed URL); sampling 10 %; latency histograms for `gen_ai.client.operation`,
+  `db.vector.client.operation` and `http.server.requests`, so Grafana can compute p95; resource attributes `service.version`
+  and `deployment.environment` on every metric and span; OTLP log export off (logs stay on stdout, 10.3).
+- `application-local.yml`: both exports on against `localhost:4318`, metrics pushed every 10 s, every request traced.
+- `spring.ai.chat.observations.log-prompt` / `log-completion`, the `ChatClient`'s and the vector store's content switches: all
+  `false` in every profile. `include-error-logging: true`.
+- `compose.yaml`: `grafana/otel-lgtm` (OTLP collector, Prometheus, Tempo, Loki, Grafana) behind the `observability` profile,
+  plus one dashboard provider and its dashboard (`compose/grafana/`).
+- Local log lines now carry `[traceId-spanId]`, so a log line leads to its trace.
+
+**One piece of content has no switch.** The first live trace had the user's question in the vector search span:
+`db.vector.query.content = "Can I return opened earbuds?"`, with every `log-*` property off. `config.ai.ObservabilityConfig`
+registers an `ObservationFilter` that removes that attribute before any handler sees the observation, in every profile.
+`TokenUsageMetricsIT` checks that no finished observation holds the question (and fails without the filter).
+
+**Run it.**
+
+```bash
+docker compose -f compose.yaml -f compose.gpu.yaml --profile ai --profile observability up -d   # or without the GPU file
+./mvnw -pl spring-ai-training spring-boot:run -Dspring-boot.run.profiles=local
+# a few POST /api/v1/knowledge/answers and /api/v1/chat-completions, then:
+# http://localhost:3000 > Dashboards > Training > "Spring AI - token usage and latency"
+```
+
+Names as they land in Prometheus: dots become underscores, counters get `_total`, timers get their unit
+(`gen_ai_client_token_usage_total`, `gen_ai_client_operation_milliseconds_bucket`, `db_vector_client_operation_milliseconds_bucket`).
+
+**The dashboard** (`compose/grafana/dashboards/spring-ai-token-usage.json`):
+
+| Panel                                   | Query (shortened)                                                                         |
+|-----------------------------------------|-------------------------------------------------------------------------------------------|
+| Tokens in range, by operation and type  | `sum by (operation, type) (increase(gen_ai_client_token_usage_total[$__range]))`          |
+| Tokens per minute, by model and type    | `sum by (response_model, type) (rate(...token_usage_total[...])) * 60`                    |
+| Average input / output tokens per chat call | token rate / `gen_ai_client_operation_milliseconds_count` rate                        |
+| Model call latency p50 / p95            | `histogram_quantile(0.95, ... gen_ai_client_operation_milliseconds_bucket ...)`           |
+| Vector search p95, calls per minute     | `db_vector_client_operation_milliseconds_bucket`; call rate by operation and `error`      |
+| Recent RAG answers (Tempo)              | TraceQL `{resource.service.name="spring-ai-training" && name="http post /api/{version}/knowledge/answers"}` |
+
+**Live** (Ollama on the GPU, `local`, port 8081, `provider=OLLAMA`, a handful of RAG answers and one chat call). A RAG answer's
+trace in Tempo:
+
+```text
+http post /api/{version}/knowledge/answers        17018 ms
+  spring_ai chat_client                           16887 ms
+    tool _calling                                 16884 ms
+      question_answer                             16880 ms
+        embedding                                  6495 ms   3 tokens   <- "Hello World", see below
+        oracle query                                545 ms   top_k 4, threshold 0.0
+          embedding                                  86 ms   9 tokens   <- the question
+        rag_logging                                9766 ms
+          simple_logger > thinking_blocks > call
+            chat qwen3.5:4b                        9717 ms   795 in, 102 out
+```
+
+Warm requests took 1.0-2.8 s end to end. Prometheus after the run: chat p95 ~1.8 s, embedding p95 ~50 ms, vector search p95
+~67 ms, ~790 input and ~35 output tokens per chat call on average. RAG answers are prompt-heavy: the retrieved context is most
+of the input, which is where 10.2's smaller chunks pay off.
+
+**Pitfalls (Spring AI 2.0.1):**
+
+| Pitfall                                                                              | Here                                                        |
+|--------------------------------------------------------------------------------------|-------------------------------------------------------------|
+| The vector search span carries the query text (`db.vector.query.content`), no property turns it off | `ObservabilityConfig`'s `ObservationFilter`   |
+| The first vector search per process embeds `"Hello World"`: the search observation asks the embedding model for its dimensions, and for a model Spring AI doesn't know it embeds a test string. Counted as tokens, and slow on a cold model (6.5 s above) | known; `TokenUsageMetricsIT` warms up before measuring |
+| The embedding observation's `gen_ai.request.model` is `none` (Ollama)                | dashboards group by `gen_ai.response.model`                 |
+| `percentiles-histogram` matches by prefix: `gen_ai.client.operation.active` gets buckets too | harmless, a few extra series                        |
+| Recording is on without any exporter: the `SimpleMeterRegistry` in tests, a buffer until export | tests read the `MeterRegistry` directly         |
+| Grafana's file provider only picks up a dashboard directory that existed at startup  | create `compose/grafana/dashboards` before `up`, or restart `otel-lgtm` |
+| The OTLP exporter pulls in protobuf, which prints `sun.misc.Unsafe` deprecation warnings on Java 25 | noise                                          |
+
+**Tests.** `TokenUsageMetricsIT` (3): the real `OllamaChatModel` / `OllamaEmbeddingModel` against a stub Ollama server (a JDK
+`HttpServer` with fixed token counts) on the full context: a chat call adds exactly 42 / 7 / 49 tokens with only the
+low-cardinality tags; a RAG answer adds one embedding (5 tokens), one vector search and one chat call; no finished observation
+contains the question.
