@@ -37,12 +37,12 @@ class AssistantControllerTest {
 	void theAnswerComesWithTheToolCallsAndTheUsage() {
 		given(assistantService.answer(new AssistantRequest("What does LAP-0002 cost?")))
 				.willReturn(new AssistantResponse("2199.00 EUR [LAP-0002].",
-												  List.of(new ToolCall("getProduct", "{\"sku\":\"LAP-0002\"}", 180, 6, null)),
+												  List.of(new ToolCall("getProduct", "{\"input\":{\"sku\":\"LAP-0002\"}}", 180, 6, null)),
 												  "qwen3.5:4b", new TokenUsage(1652, 60, 1712)));
 
 		assertThat(post("{\"question\": \"What does LAP-0002 cost?\"}")).hasStatusOk().bodyJson().isLenientlyEqualTo("""
 																													 {"content": "2199.00 EUR [LAP-0002].",
-																													  "toolCalls": [{"name": "getProduct", "arguments": "{\\"sku\\":\\"LAP-0002\\"}", "resultChars": 180, "error": null}],
+																													  "toolCalls": [{"name": "getProduct", "arguments": "{\\"input\\":{\\"sku\\":\\"LAP-0002\\"}}", "resultChars": 180, "error": null}],
 																													  "model": "qwen3.5:4b", "usage": {"totalTokens": 1712}}""");
 	}
 

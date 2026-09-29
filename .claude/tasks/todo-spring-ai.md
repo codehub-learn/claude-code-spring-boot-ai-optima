@@ -106,7 +106,7 @@ own module — no code here should be required for the Spring Boot units to buil
 - [x] **11.1 Tools vs APIs** — a `@Tool`-annotated method on a dedicated `*Tools` component,
   contrasted with calling the same capability as a plain REST endpoint, to make the distinction
   concrete.
-- [ ] **11.2 Validation** — Jakarta Bean Validation on tool-call input records, a rejected-call
+- [x] **11.2 Validation** — Jakarta Bean Validation on tool-call input records, a rejected-call
   demo showing the model receiving a validation error back.
 - [ ] **11.3 Error handling** — a tool that can fail (e.g. an external lookup), translated into a
   model-legible error response rather than an unhandled exception.
@@ -687,3 +687,26 @@ own module — no code here should be required for the Spring Boot units to buil
   pitfalls, tests).
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped → `BUILD SUCCESS` (spring-ai-training: 165 unit/slice +
   47 IT, 0 failures; spring-boot-training 75 + 66).
+
+### 11.2 Validation (done)
+
+- Decisions (approved plan): input **records** with Jakarta Bean Validation, checked by Spring's method validation proxy
+  (`@Validated` on `CatalogTools`, `@Valid` on the parameters), and a fixed model-facing message.
+- `ProductSearchInput(keywords, maxPrice)` and `ProductLookupInput(sku)` in `product/dto` (constraint messages written for a model);
+  `CatalogTools` takes one record per tool (JSON arguments are now nested: `{"input":{...}}`); `searchProducts` treats a missing
+  `input` as "list products".
+- `config.ai.ToolValidationExceptionProcessor`: a `ToolExecutionExceptionProcessor` bean (Spring AI's auto-config backs off for it)
+  turning a `ConstraintViolationException` into "Invalid arguments, the tool did not run: sku must ...; Fix the arguments and call the
+  tool again."; every other failure goes to the default processor. `toolCalls[].error` still shows the raw exception message.
+- Findings (2.0.1): Spring AI does not read Bean Validation annotations, so the tool's JSON schema has no `pattern` / `maxLength`;
+  a single record parameter is nested under its parameter name; `ToolCallbacks.from(...)` works on the AOP proxy; the violation
+  arrives as the `ToolExecutionException`'s root cause.
+- Live (`local`, port 8081, `provider=OLLAMA`, qwen3.5:4b): nested input works (laptops under 1500, SKU price, name search, unknown
+  SKU); `SKU FLEX13` was rejected and the model relayed the format rule; "laptop flex 13" made the model invent `LAP-0013`, which
+  passes validation and is "not found": validation checks shape, not truth. Not run: Anthropic.
+- Tests: `CatalogToolsTest` (6), `ToolValidationExceptionProcessorTest` (3), `AssistantApiIT` (4: scripted bad call, rejection
+  message in round 2, corrected call); `AssistantControllerTest` fixture uses the nested arguments.
+- README: 11.2 section (constraint table, where validation runs, message, live table, limits, tests); 11.1's loop example updated to
+  the nested shape.
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-ai-training: 170 unit/slice + 48
+  IT, 0 failures). The compose stack was restarted afterwards, including the `ai` and `observability` profiles.

@@ -1644,7 +1644,7 @@ curl -X POST localhost:8080/api/v1/assistant/answers -H 'Content-Type: applicati
 `ToolCallingAdvisor` (always in the chain, order `HIGHEST_PRECEDENCE + 300`) runs the loop:
 
 1. the prompt goes out with the definitions;
-2. the model replies with a tool call (`getProduct {"sku":"LAP-0002"}`) instead of text;
+2. the model replies with a tool call (`getProduct {"input":{"sku":"LAP-0002"}}`, the shape since 11.2) instead of text;
 3. the advisor invokes the method, serializes the result to JSON and appends an assistant message (the call) and a tool
    response message (the result);
 4. the whole conversation goes back to the model; repeat until it answers with text. Usage is summed over the rounds.
@@ -1706,3 +1706,60 @@ and searched `"teclado"`. Send UTF-8 from a file (`--data-binary @question.json`
 - `ProductApiIT` (4): any-word ranking, the price ceiling, demo rows left out, case-insensitive SKU, 404.
 - `AssistantApiIT` (3): a scripted model and the real tools over Oracle: the loop's two rounds and message order, the tool
   result reaching the model, a failing call reaching it as its message, no tools when none are needed.
+
+### 11.2 Validation
+
+**A model's arguments are untrusted input.** Spring AI binds the call's JSON to the method's parameter types and invokes it;
+nothing checks the values. A model can send a product name where a SKU belongs, a negative price, or a paragraph as
+`keywords`. So each tool takes one input record with Jakarta Bean Validation constraints, the same way a controller takes a
+request record:
+
+| Tool | Input record | Constraints |
+|---|---|---|
+| `searchProducts` | `ProductSearchInput(keywords, maxPrice)` | `keywords` at most 60 characters; `maxPrice` positive, at most 100000; both optional |
+| `getProduct` | `ProductLookupInput(sku)` | `sku` not blank, letters + dash + digits (`[A-Za-z]{2,5}-\d{1,6}`) |
+
+**Where it runs.** `CatalogTools` is `@Validated` and the parameters are `@Valid`, so Spring's method validation proxy checks
+the arguments before the method body, and before any SQL. `ToolCallbacks.from(...)` works on the proxy unchanged. A violation
+throws `ConstraintViolationException`; Spring AI wraps it in a `ToolExecutionException` and, by default, sends its message back
+to the model as the tool's result: `getProduct.input.sku: must be letters, a dash and digits, like LAP-0002`. That is legible
+but reads like a log line (a method path first, and with a stock constraint message it would be a regular expression), and
+several violations arrive in no set order.
+
+**What the model reads instead.** `ToolValidationExceptionProcessor` (a `ToolExecutionExceptionProcessor` bean, which makes
+Spring AI's auto-configuration back off) rewrites only that case, and passes every other failure to the default processor:
+
+```
+Invalid arguments, the tool did not run: sku must be letters, a dash and digits, like LAP-0002. Fix the arguments and call the tool again.
+```
+
+It says that nothing ran, names each argument and why it is wrong (the constraint messages are written for a model, not for a
+log), and asks for a corrected call. `toolCalls[].error` in the response still shows the exception's own message.
+
+**Live** (`qwen3.5:4b`, `local`, `provider=OLLAMA`):
+
+| Question | Tool call | Result |
+|---|---|---|
+| What is the price of the product with SKU FLEX13? | `getProduct {"input":{"sku":"FLEX13"}}` | rejected; the model told the customer the SKU format is wrong and asked for a correct one |
+| Look up SKU: laptop flex 13 and give me its price. | `getProduct {"input":{"sku":"LAP-0013"}}` | passes validation (invented SKU), "No product with SKU LAP-0013" |
+| Which laptops do you have under 1500 euro? | `searchProducts {"input":{"keywords":"laptop","maxPrice":1500}}` | LAP-0003, LAP-0001 |
+
+The nested `input` object did not bother the small model: the three questions the flat schema handled in 11.1 still work.
+
+**Limits to know.**
+- Validation checks the *shape*, not the *truth*. The second row: the model made up a well-formed SKU, it passed, and the
+  catalog said "not found". A constraint keeps garbage out of the service; it cannot make a model honest.
+- The JSON schema sent to the model carries **no constraints** (no `pattern`, no `maxLength`): Spring AI 2.0.1 does not read
+  Bean Validation annotations. The model learns the rules from the descriptions and from the rejection message, so write the
+  rule in both places.
+- A single record parameter is nested in the schema (`{"input": {...}}`), where separate parameters were flat.
+- The proxy validates every call to the tools, also from Java. `new CatalogTools(...)` in a plain unit test skips it; the tests
+  wrap it in a `MethodValidationInterceptor`.
+
+**Tests.**
+- `CatalogToolsTest` (6): the input schema is nested, arguments still bind, bad SKU shapes, a blank and a missing SKU, and a
+  negative price never reach `ProductService`; a valid call passes.
+- `ToolValidationExceptionProcessorTest` (3): the message for one violation, several violations in a stable order, another
+  failure keeps the default message.
+- `AssistantApiIT` (4, one new): a scripted model sends `getProduct` with a product name; the recorded call has the error, the
+  model's second round receives the rejection message, it calls again with a valid SKU and answers.

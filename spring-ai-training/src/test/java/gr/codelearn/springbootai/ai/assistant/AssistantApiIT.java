@@ -56,7 +56,7 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 		final var response = ask("What does LAP-0002 cost?").exchange();
 
 		assertThat(response).hasStatusOk().bodyJson().isLenientlyEqualTo("""
-																		 {"toolCalls": [{"name": "getProduct", "arguments": "{\\"sku\\":\\"LAP-0002\\"}", "error": null}],
+																		 {"toolCalls": [{"name": "getProduct", "arguments": "{\\"input\\":{\\"sku\\":\\"LAP-0002\\"}}", "error": null}],
 																		  "usage": {"promptTokens": 200, "completionTokens": 20, "totalTokens": 220}}""");
 		// The tool result the model got is the product as JSON, read live from the catalog. Usage is summed over both rounds.
 		assertThat(response).bodyJson().extractingPath("$.content").asString()
@@ -77,6 +77,27 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 		assertThat(ask("Is AUD-9999 in stock?")).hasStatusOk().bodyJson().isLenientlyEqualTo("""
 																							 {"content": "Tool said: No product with SKU AUD-9999",
 																							  "toolCalls": [{"name": "getProduct", "resultChars": 28, "error": "No product with SKU AUD-9999"}]}""");
+	}
+
+	@Test
+	void aRejectedCallReachesTheModelAsAValidationMessageAndTheModelCorrectsIt() {
+		final var response = ask("Tell me about the blue laptop").exchange();
+
+		// Three rounds: the bad call (a product name where a SKU belongs), its rejection, the corrected call and its answer.
+		assertThat(response).hasStatusOk().bodyJson().isLenientlyEqualTo("""
+																		 {"toolCalls": [
+																		   {"name": "getProduct", "arguments": "{\\"input\\":{\\"sku\\":\\"blue laptop\\"}}"},
+																		   {"name": "getProduct", "arguments": "{\\"input\\":{\\"sku\\":\\"LAP-0002\\"}}", "error": null}]}""");
+		assertThat(response).bodyJson().extractingPath("$.toolCalls[0].error").asString()
+							.contains("sku: must be letters, a dash and digits, like LAP-0002");
+		assertThat(response).bodyJson().extractingPath("$.content").asString().startsWith("Tool said: {\"sku\":\"LAP-0002\"");
+
+		// The model saw the rejection as the tool's result, in words, and the catalog was not queried for "blue laptop".
+		assertThat(model.prompts).hasSize(3);
+		final var rejection = (ToolResponseMessage) model.prompts.get(1).getInstructions().getLast();
+		assertThat(rejection.getResponses().getFirst().responseData())
+				.isEqualTo("Invalid arguments, the tool did not run: sku must be letters, a dash and digits, like LAP-0002. "
+						   + "Fix the arguments and call the tool again.");
 	}
 
 	@Test
@@ -104,7 +125,8 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 	}
 
 	/**
-	 * Round 1: a SKU in the user message → a {@code getProduct} tool call; none → a plain answer. Round 2 (a tool response is present):
+	 * Round 1: a SKU in the user message -> a {@code getProduct} tool call; "blue laptop" -> a call with that name as the SKU (invalid);
+	 * none -> a plain answer. Next rounds (a tool response is present): after a rejection, the call again with a valid SKU; otherwise
 	 * answers with the tool's result. 100 prompt + 10 completion tokens per round.
 	 */
 	static final class ScriptedModel implements ChatModel {
@@ -117,19 +139,29 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 			final Message last = prompt.getInstructions().getLast();
 			final AssistantMessage reply;
 			if (last instanceof ToolResponseMessage toolResponse) {
-				reply = new AssistantMessage("Tool said: " + toolResponse.getResponses().getFirst().responseData());
+				final String result = String.valueOf(toolResponse.getResponses().getFirst().responseData());
+				reply = result.startsWith("Invalid arguments") ? getProduct("LAP-0002") : new AssistantMessage("Tool said: " + result);
 			} else {
-				final var sku = java.util.regex.Pattern.compile("[A-Z]{3}-\\d{4}").matcher(prompt.getUserMessage().getText());
-				reply = sku.find()
-						? AssistantMessage.builder()
-										  .content("")
-										  .toolCalls(List.of(new ToolCall("call-1", "function", "getProduct",
-																		  "{\"sku\":\"" + sku.group() + "\"}")))
-										  .build()
-						: new AssistantMessage("No tool needed.");
+				final String question = prompt.getUserMessage().getText();
+				final var sku = java.util.regex.Pattern.compile("[A-Z]{3}-\\d{4}").matcher(question);
+				if (sku.find()) {
+					reply = getProduct(sku.group());
+				} else if (question.contains("blue laptop")) {
+					reply = getProduct("blue laptop");
+				} else {
+					reply = new AssistantMessage("No tool needed.");
+				}
 			}
 			return new ChatResponse(List.of(new Generation(reply)),
 									ChatResponseMetadata.builder().model("scripted").usage(new DefaultUsage(100, 10)).build());
+		}
+
+		private static AssistantMessage getProduct(final String sku) {
+			return AssistantMessage.builder()
+								   .content("")
+								   .toolCalls(List.of(new ToolCall("call-1", "function", "getProduct",
+			                                                       "{\"input\":{\"sku\":\"" + sku + "\"}}")))
+								   .build();
 		}
 
 		@Override
