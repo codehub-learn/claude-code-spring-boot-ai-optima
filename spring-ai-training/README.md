@@ -1612,3 +1612,97 @@ of the input, which is where 10.2's smaller chunks pay off.
 `HttpServer` with fixed token counts) on the full context: a chat call adds exactly 42 / 7 / 49 tokens with only the
 low-cardinality tags; a RAG answer adds one embedding (5 tokens), one vector search and one chat call; no finished observation
 contains the question.
+
+## U11 — Tool Calling & MCP
+
+### 11.1 Tools vs APIs
+
+**One capability, two doors.** A live product lookup over the catalog (`product.ProductService`: keyword search with an optional
+price ceiling, get by SKU) is exposed twice:
+
+| | REST API (`ProductController`) | Tools (`CatalogTools`) |
+|---|---|---|
+| Caller | a program | a model |
+| Interface | URL, parameters, status codes, OpenAPI | tool name, description, JSON schema of the parameters |
+| Who decides to call, and with what | the programmer, in code | the model, per request, from the descriptions |
+| Guarantee of a call | yes | none: the model may skip it, call it twice, or pick wrong arguments |
+| Result | JSON response for code | JSON text sent back into the prompt (costs tokens, so kept to 5 products) |
+| Unknown SKU | `404` `ProblemDetail` | the exception's message becomes the tool's result; the model reads it |
+| Latency (live) | ~10 ms | 3.4 s for the whole answer (two model rounds) |
+
+```bash
+curl "localhost:8080/api/v1/products?query=laptop&max-price=1500"       # REST: the caller chose the filter
+curl localhost:8080/api/v1/products/LAP-0002
+curl -X POST localhost:8080/api/v1/assistant/answers -H 'Content-Type: application/json' \
+     -d '{"question": "Which laptops do you have under 1500 EUR?"}'        # the model chooses
+```
+
+**How a tool call works** (Spring AI 2.0.1). `ToolCallbacks.from(catalogTools)` turns each `@Tool` method into a
+`ToolCallback`: a definition (name, description, input schema from the parameter types and `@ToolParam`s;
+`required = false` keeps a parameter out of `required`) plus an invoker. `AssistantService` passes them per call with
+`.tools(...)`, so only `POST /api/v1/assistant/answers` offers them; the central `ChatClient` stays tool-free. Then the
+`ToolCallingAdvisor` (always in the chain, order `HIGHEST_PRECEDENCE + 300`) runs the loop:
+
+1. the prompt goes out with the definitions;
+2. the model replies with a tool call (`getProduct {"sku":"LAP-0002"}`) instead of text;
+3. the advisor invokes the method, serializes the result to JSON and appends an assistant message (the call) and a tool
+   response message (the result);
+4. the whole conversation goes back to the model; repeat until it answers with text. Usage is summed over the rounds.
+
+A turn is capped by default at 40 calls per tool and 150 in total (`DefaultToolCallingManager`); past that, the breach is
+returned as the answer instead of looping.
+
+**The response shows the model's decisions.** Each call's tools are wrapped in a `RecordingToolCallback` (a decorator writing
+to a per-request list), so `toolCalls` lists name, the model's JSON arguments, result size, time and error. A decorator rather
+than `ToolContext`: the tools stay plain capabilities, and nothing about recording leaks into their signatures.
+
+**Live** (`qwen3.5:4b` on the GPU, `local`, port 8081, `provider=OLLAMA`):
+
+| Question | Tool calls | Answer |
+|---|---|---|
+| Which headphones do you sell and how much are they? | `searchProducts {"keywords":"headphones"}` | Studio 3 Over-Ear [AUD-0001], 349.00 EUR |
+| What does LAP-0002 cost? | `getProduct {"sku":"LAP-0002"}` | Latitude 16 Workstation, 2199.00 EUR |
+| Is AUD-9999 in stock? | `getProduct {"sku":"AUD-9999"}` → error "No product with SKU AUD-9999" | "no product with SKU AUD-9999" |
+| What is the capital of France? | none | Paris (793 prompt tokens against 165 on `/chat-completions`: definitions + instructions) |
+| Which laptops under 1500 EUR? | `searchProducts {"keywords":"laptop","maxPrice":1500}` | LAP-0003 1099, LAP-0001 1299 |
+| Τι λάπτοπ έχετε κάτω από 1500 ευρώ; | same, in English | the same two, in Greek |
+| Τι ακουστικά έχετε; | `searchProducts {"keywords":"headphones speakers earphones audio"}` | four audio products, in Greek |
+
+A tool-using answer cost ~1,650-1,950 prompt tokens: the definitions and instructions (~630) are sent in *both* rounds, and
+the second round adds the call and its result.
+
+**What went wrong first, and why it matters.** The first version failed twice, and both times the tool "worked" (no error):
+- Only a `keywords` parameter, every word required. "Laptops under 1500 euro" (in Greek) became
+  `{"keywords":"laptop, under 1500 euro, price"}`, nothing matched, and the model told the customer there were none.
+  Fix: a `maxPrice` parameter, and a description that keeps prices and conditions out of the keywords.
+- "What headphones do you have?" became `"acoustics headphones speakers"`: models list synonyms. Every word required again,
+  nothing matched, "we don't sell headphones". Fix: any word matches, best matches first (in the service, so REST got it too).
+- The Greek keyword `ακουστικά` found nothing in an English catalog. Fix: the instructions say tool arguments are in English.
+
+An empty result looks like a true answer to a model, and it states it with confidence. Design tool parameters around what the
+model will write, not around the SQL, and test with the questions users actually ask.
+
+Also found: Greek sent with `curl -d` from Git Bash on Windows reached the app as `?` (console code page); the model got noise
+and searched `"teclado"`. Send UTF-8 from a file (`--data-binary @question.json`) or a script.
+
+**Pitfalls (Spring AI 2.0.1):**
+
+| Pitfall | Here |
+|---|---|
+| `.tools(...)` is dropped silently when the model's `getOptions()` are not `ToolCallingChatOptions` (real providers' are; a hand-written stub's aren't) | the IT stub returns `ToolCallingChatOptions` |
+| A tool exception is not an error for the caller: by default its message goes back to the model as the result | recorded as `error`; 11.3 builds on it |
+| Tool definitions are sent on every round | per-call tools, only on the assistant endpoint |
+| An example value in a parameter description gets copied by a small model | descriptions describe, no product examples |
+| Tool call spans (10.4) could carry arguments and results | `spring.ai.tools.observations.include-content: false` |
+| MockMvcTester sends the request again on every `assertThat(builder)` | `.exchange()` once, then assert |
+
+**Also in this step.** The catalog schema setting moved from `app.ai.knowledge.catalog-schema` to `app.ai.catalog.schema`
+(`config.persistence.CatalogProperties`), since two features read it now.
+
+**Tests.**
+- `CatalogToolsTest` (4): the generated definitions and schemas, JSON arguments bound to the method (missing optional ones as
+  `null`), the result as JSON, an exception wrapped with its message.
+- `ProductServiceTest` (5): how a query becomes keywords. `ProductControllerTest` (5), `AssistantControllerTest` (3).
+- `ProductApiIT` (4): any-word ranking, the price ceiling, demo rows left out, case-insensitive SKU, 404.
+- `AssistantApiIT` (3): a scripted model and the real tools over Oracle: the loop's two rounds and message order, the tool
+  result reaching the model, a failing call reaching it as its message, no tools when none are needed.

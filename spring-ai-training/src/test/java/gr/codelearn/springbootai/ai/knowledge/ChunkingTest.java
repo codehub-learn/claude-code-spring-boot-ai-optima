@@ -39,7 +39,7 @@ class ChunkingTest {
 										   """;
 
 	private final DocumentChunker chunker = new DocumentChunker(
-			new KnowledgeProperties("training", new Chunking(ChunkingStrategy.MARKDOWN, 200)));
+			new KnowledgeProperties(new Chunking(ChunkingStrategy.MARKDOWN, 200)));
 
 	@Test
 	void theTokenSplitterCutsByTokenCountAndKeepsNoContext() {
@@ -119,9 +119,9 @@ class ChunkingTest {
 	void theBundledLongDocumentsSplitIntoSeveralChunks() {
 		final List<BundledDocument> documents = new BundledDocumentReader(new DefaultResourceLoader()).read();
 		final BundledDocument terms = documents.stream()
-		                                       .filter(document -> document.name().equals("terms-of-sale"))
-		                                       .findFirst()
-		                                       .orElseThrow();
+											   .filter(document -> document.name().equals("terms-of-sale"))
+											   .findFirst()
+											   .orElseThrow();
 
 		assertThat(chunker.chunk(terms, ChunkingStrategy.WHOLE)).hasSize(1);
 		assertThat(chunker.chunk(terms, ChunkingStrategy.TOKEN)).hasSizeGreaterThan(4);

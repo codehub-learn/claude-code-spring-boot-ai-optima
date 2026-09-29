@@ -103,7 +103,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U11 — Tool Calling & MCP
 
-- [ ] **11.1 Tools vs APIs** — a `@Tool`-annotated method on a dedicated `*Tools` component,
+- [x] **11.1 Tools vs APIs** — a `@Tool`-annotated method on a dedicated `*Tools` component,
   contrasted with calling the same capability as a plain REST endpoint, to make the distinction
   concrete.
 - [ ] **11.2 Validation** — Jakarta Bean Validation on tool-call input records, a rejected-call
@@ -653,3 +653,37 @@ own module — no code here should be required for the Spring Boot units to buil
   numbers, pitfalls, tests).
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped → `BUILD SUCCESS` (spring-ai-training: 148 unit/slice + 40
   IT, 0 failures; spring-boot-training 75 + 66), no OTLP export attempt in the test logs.
+
+### 11.1 Tools vs APIs (done)
+
+- User decisions: **catalog product lookup** as the capability; tools offered on a **new assistant endpoint** only (per call, not
+  defaults of the central client); the response **lists the tool calls**. Deviation: recorded with a `RecordingToolCallback`
+  decorator (per-request list) instead of `ToolContext`, so the tools' signatures stay clean.
+- `product` feature: `ProductService` (public; JdbcClient over the catalog schema; any-keyword search over SKU, name, description,
+  category, ranked by matched keywords, optional `maxPrice`, `GEN-*` excluded; get by SKU, case-insensitive), `ProductController`
+  (`GET /api/v1/products?query=&max-price=&limit=`, `GET /api/v1/products/{sku}`, 404 via new `ProductNotFoundException` in
+  `ApiExceptionHandler`), `CatalogTools` (`@Tool searchProducts(keywords?, maxPrice?)` max 5 results, `@Tool getProduct(sku)`),
+  `ProductResponse`.
+- `assistant` feature: `AssistantController` (`POST /api/v1/assistant/answers`), `AssistantService` (`.tools(...)` with the
+  recording wrappers, template `prompts/assistant/question.st`), `AssistantRequest`, `AssistantResponse` (+ `ToolCall`, summed
+  `TokenUsage`).
+- Refactor: `app.ai.knowledge.catalog-schema` → `app.ai.catalog.schema` (`config.persistence.CatalogProperties`), read by
+  `knowledge` and `product`. `spring.ai.tools.observations.include-content: false`.
+- Live fixes (qwen3.5:4b): keywords-only + every-word-required made "laptops under 1500 euro" search
+  `"laptop, under 1500 euro, price"` → empty → "none"; a synonym list `"acoustics headphones speakers"` → empty too; a Greek
+  keyword found nothing. Fixed with `maxPrice`, any-word ranking, and "tool arguments in English" in the instructions. Also:
+  Greek via `curl -d` in Git Bash arrived as `?` (code page); sent from a UTF-8 script afterwards.
+- Findings (2.0.1): `ChatClient` attaches tools only when `chatModel.getOptions()` is `ToolCallingChatOptions` (else dropped
+  silently; bit the IT stub); a tool exception goes back to the model as its message (`DefaultToolExecutionExceptionProcessor`);
+  `ToolCallingAdvisor` (order `HIGHEST_PRECEDENCE + 300`) runs the loop and sums usage; default limits 40 calls per tool / 150
+  per turn; `MockMvcTester` re-sends the request on each `assertThat(builder)`.
+- Live (`local`, GPU, port 8081, `provider=OLLAMA`): 8 questions correct after the fixes (headphones, SKU price, unknown SKU,
+  no-tool question, laptops under 1500 in English and Greek, Greek headphones, cheapest laptops); REST ~10 ms vs 3.4 s for a
+  tool-using answer; ~1,650-1,950 prompt tokens with tools vs 165 without. Not run: Anthropic.
+- Tests: `CatalogToolsTest` (4), `ProductServiceTest` (5), `ProductControllerTest` (5), `AssistantControllerTest` (3),
+  `ProductApiIT` (4), `AssistantApiIT` (3, scripted model + real tools over Oracle). A first IT run hit the known Testcontainers
+  Oracle start timeout while compose Oracle + Ollama were up; passed with compose stopped.
+- README: new U11 heading, 11.1 section (comparison table, how the loop works, recording, live table, what went wrong first,
+  pitfalls, tests).
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped → `BUILD SUCCESS` (spring-ai-training: 165 unit/slice +
+  47 IT, 0 failures; spring-boot-training 75 + 66).

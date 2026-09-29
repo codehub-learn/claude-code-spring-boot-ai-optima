@@ -1,5 +1,5 @@
 -- Unit 10.1 fixture for KnowledgeApiIT: a minimal copy of spring-boot-training's catalog tables in the test schema (the Testcontainers
--- user), where app.ai.knowledge.catalog-schema points under the test profile. Only the columns CatalogDocumentReader reads.
+-- user), where app.ai.catalog.schema points under the test profile. Only the columns CatalogDocumentReader and ProductService read.
 -- Idempotent: the container is shared by every IT in the JVM.
 create table if not exists category
 (

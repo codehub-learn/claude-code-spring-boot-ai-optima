@@ -66,6 +66,10 @@ spring:
             # Unit 9.2: JdbcChatMemoryRepository can create its table from its bundled schema-oracle.sql. Never: Flyway owns the
             # schema (V1__create_chat_memory.sql copies that table and adds a foreign key to conversation).
             initialize-schema: never
+    tools:
+      observations:
+        # Unit 11.1: each tool call is a span too (10.4). Its arguments and result are content (a search term, product data): kept out.
+        include-content: false
     vectorstore:
       observations:
         # Unit 10.4: the vector search span (db.vector.client.operation) without the retrieved documents' text.
@@ -230,10 +234,11 @@ app:
       top-k: 4
       # Minimum similarity (0-1, 1 - cosine distance) for a document to count as retrieved. 0 accepts the whole top-k; 10.2 tunes it.
       similarity-threshold: 0.0
+    catalog:
+      # Unit 10.1, moved here in 11.1 (config.persistence.CatalogProperties): the schema holding spring-boot-training's catalog tables,
+      # read-only (grant in compose/oracle-startdb/02_ai_training_catalog_read.sql). Read by the knowledge and product features.
+      schema: training
     knowledge:
-      # Unit 10.1 (knowledge.KnowledgeProperties): the schema holding spring-boot-training's catalog tables, read-only (grant in
-      # compose/oracle-startdb/02_ai_training_catalog_read.sql).
-      catalog-schema: training
       chunking:
         # Unit 10.2: ingestion stores the bundled documents under every strategy (whole | token | markdown); this one answers.
         # Picked from POST /api/v1/knowledge/evaluations (see the README's 10.2 table).

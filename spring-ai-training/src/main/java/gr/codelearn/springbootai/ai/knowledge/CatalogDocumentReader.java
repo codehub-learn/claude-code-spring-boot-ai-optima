@@ -1,5 +1,7 @@
 package gr.codelearn.springbootai.ai.knowledge;
 
+import gr.codelearn.springbootai.ai.config.persistence.CatalogProperties;
+
 import org.springframework.ai.document.Document;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
@@ -33,15 +35,15 @@ class CatalogDocumentReader {
 	static final String NOT_CHUNKED = "none";
 
 	private final JdbcClient jdbcClient;
-	private final KnowledgeProperties properties;
+	private final CatalogProperties catalog;
 
-	CatalogDocumentReader(final JdbcClient jdbcClient, final KnowledgeProperties properties) {
+	CatalogDocumentReader(final JdbcClient jdbcClient, final CatalogProperties catalog) {
 		this.jdbcClient = jdbcClient;
-		this.properties = properties;
+		this.catalog = catalog;
 	}
 
 	List<Document> read() {
-		final String schema = properties.catalogSchema();
+		final String schema = catalog.schema();
 		return jdbcClient.sql("""
 							  select p.sku, p.name, p.description, p.price, c.name as category
 							  from %s.product p

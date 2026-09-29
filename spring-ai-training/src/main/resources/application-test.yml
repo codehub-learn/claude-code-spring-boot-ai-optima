@@ -27,6 +27,6 @@ logging:
 
 app:
   ai:
-    knowledge:
-      # Unit 10.1: the Testcontainers user's own schema, where KnowledgeApiIT's @Sql fixture creates the catalog tables.
-      catalog-schema: test
+    catalog:
+      # Unit 10.1: the Testcontainers user's own schema, where the @Sql catalog fixture (sql/knowledge-catalog.sql) creates the tables.
+      schema: test
