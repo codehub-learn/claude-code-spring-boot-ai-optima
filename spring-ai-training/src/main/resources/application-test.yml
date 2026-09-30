@@ -12,6 +12,10 @@ spring:
     # Unit 9.2: Boot migrates the per-run Testcontainers database on context start; `flyway:migrate` can't reach it.
     enabled: true
   ai:
+    mcp:
+      client:
+        # Unit 11.4: no MCP server in the tests, so the client (and its tool provider) is off. Tests bring their own ToolCallbackProvider.
+        enabled: false
     anthropic:
       # Dummy key so tests never depend on (or pick up) a developer's real ANTHROPIC_API_KEY. They stub the ChatModel anyway.
       api-key: test-key-not-used

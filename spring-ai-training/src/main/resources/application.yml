@@ -66,6 +66,27 @@ spring:
             # Unit 9.2: JdbcChatMemoryRepository can create its table from its bundled schema-oracle.sql. Never: Flyway owns the
             # schema (V1__create_chat_memory.sql copies that table and adds a foreign key to conversation).
             initialize-schema: never
+    mcp:
+      client:
+        # Unit 11.4: MCP client (spring-ai-starter-mcp-client) over streamable HTTP to spring-ai-mcp-server-training. Its tools become one
+        # ToolCallbackProvider bean, used by the mcp feature. The application-test.yml profile turns the client off.
+        name: spring-ai-training
+        type: SYNC
+        # false: do not open the connection at startup. The default (true) makes the application fail to start while the MCP server is
+        # down; here it starts anyway, and a request that needs the server fails with a 502 instead.
+        initialized: false
+        request-timeout: 20s
+        annotation-scanner:
+          # The tools are Spring AI ToolCallbacks; this turns off the scan for the MCP SDK's own client annotations (@McpLogging, ...).
+          enabled: false
+        streamable-http:
+          connections:
+            # The connection name (training-tools) identifies the server in logs and events; the tool names the model sees are the
+            # server's own (add, currentTime), unprefixed.
+            training-tools:
+              # The local server (8090); other environments override this property.
+              url: http://localhost:8090
+              endpoint: /mcp
     tools:
       observations:
         # Unit 11.1: each tool call is a span too (10.4). Its arguments and result are content (a search term, product data): kept out.

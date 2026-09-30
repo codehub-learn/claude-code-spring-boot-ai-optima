@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: spring-ai-mcp-server-training
+  threads:
+    virtual:
+      enabled: true
+  ai:
+    mcp:
+      server:
+        name: training-tools
+        version: "@project.version@"
+        # Unit 11.4: a synchronous server (tools are plain blocking methods) speaking streamable HTTP, the current MCP HTTP transport.
+        # STREAMABLE serves one endpoint (below); SSE is the older two-endpoint transport, STDIO is for a client that launches the process.
+        type: SYNC
+        protocol: STREAMABLE
+        instructions: Toy tools for the Spring AI training. currentTime gives the time in a time zone, add sums two decimal numbers exactly.
+        streamable-http:
+          mcp-endpoint: /mcp
+        annotation-scanner:
+          # The tools are Spring AI @Tool methods (ToolsConfig). This turns off the scan for the MCP SDK's own @McpTool annotations, which
+          # would only log "No tool methods found" at startup.
+          enabled: false
+
+server:
+  # Not 8080: spring-ai-training (the MCP client) runs next to this server.
+  port: 8090
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  structured:
+    format:
+      # Native Boot structured logging (ECS JSON); application-local.yml switches it off for readable local runs.
+      console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+        version: "@project.version@"
+        environment: ${spring.profiles.active:default}

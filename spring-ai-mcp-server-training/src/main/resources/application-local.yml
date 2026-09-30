@@ -1,0 +1,15 @@
+# Local development profile, activated by `./mvnw spring-boot:run` (the Maven `local` profile) or -Dspring.profiles.active=local.
+logging:
+  structured:
+    format:
+      # Empty: readable console pattern instead of ECS JSON.
+      console:
+  level:
+    gr.codelearn.springbootai.ai.mcp: DEBUG
+    # The MCP SDK logs requests and responses at DEBUG, arguments included. Local only.
+    io.modelcontextprotocol: DEBUG
+
+spring:
+  devtools:
+    restart:
+      enabled: true

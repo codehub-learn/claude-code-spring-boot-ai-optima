@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xmlns="http://maven.apache.org/POM/4.0.0"
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<!-- Packaging -->
+	<modelVersion>4.0.0</modelVersion>
+
+	<!-- Versioning -->
+	<artifactId>spring-ai-mcp-server-training</artifactId>
+	<parent>
+		<groupId>gr.codelearn</groupId>
+		<artifactId>spring-boot-ai</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+	</parent>
+
+	<!-- Meta-data -->
+	<name>[${project.artifactId}]</name>
+	<description>Minimal MCP server for the U11 basics: a few toy tools over HTTP, called by spring-ai-training's MCP client</description>
+
+	<!-- Dependencies -->
+	<dependencies>
+		<!-- MCP server on Spring MVC (unit 11.4): the MCP Java SDK server, its Spring MVC transport (streamable HTTP) and the autoconfig
+		     that publishes every ToolCallbackProvider bean as MCP tools. Version from the spring-ai-bom imported by the reactor parent.
+		     It brings spring-boot-starter-webmvc transitively. -->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+		</dependency>
+
+		<!-- Observability base: Actuator health/info endpoints -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!-- DevTools: automatic restart while developing. optional=true so it never leaks onto a downstream classpath. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-devtools</artifactId>
+			<scope>runtime</scope>
+			<optional>true</optional>
+		</dependency>
+
+		<!-- Testing: JUnit 5, AssertJ, Spring Boot test support -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<!-- Plugins -->
+		<plugins>
+			<!-- spring-boot-maven-plugin: `spring-boot:run` (dev), `repackage` (executable layered jar, bound to `package` by the parent) -->
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<layers>
+						<enabled>true</enabled>
+					</layers>
+					<mainClass>gr.codelearn.springbootai.ai.mcp.McpServerTrainingApplication</mainClass>
+				</configuration>
+				<executions>
+					<!-- build-info goal: META-INF/build-info.properties, surfaced under /actuator/info -> "build" -->
+					<execution>
+						<id>build-info</id>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
+			<!-- maven-failsafe-plugin: runs *IT classes in the integration-test phase (inherited config from the Boot parent) -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+
+	<!-- Profiles: `local` is active unless another profile is explicitly selected; `ci` activates whenever the CI environment variable
+	     is present. Both only set the Spring profile that `spring-boot:run` starts with. -->
+	<profiles>
+		<profile>
+			<id>local</id>
+			<activation>
+				<activeByDefault>true</activeByDefault>
+			</activation>
+			<properties>
+				<spring-boot.run.profiles>local</spring-boot.run.profiles>
+			</properties>
+		</profile>
+		<profile>
+			<id>ci</id>
+			<activation>
+				<property>
+					<name>env.CI</name>
+				</property>
+			</activation>
+			<properties>
+				<spring-boot.run.profiles>test</spring-boot.run.profiles>
+			</properties>
+		</profile>
+	</profiles>
+</project>

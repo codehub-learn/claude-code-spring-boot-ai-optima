@@ -1947,3 +1947,79 @@ tool messages); each message without an id starts its own conversation; an unkno
 first message leaves no conversation behind; a failed follow-up leaves the memory as it was. `AssistantControllerTest` (12): the id is
 passed on and returned, an unknown one is a `404`, a malformed one a `400`; the answer sets a scoped `HttpOnly` session cookie, the cookie
 continues the conversation, an id in the body wins, a stale or malformed cookie is ignored, and `DELETE` clears it.
+
+### 11.4 MCP client and server basics
+
+The Model Context Protocol (MCP) is a standard way for an application to offer tools to any model client: the client asks the server
+`tools/list`, gets names, descriptions and JSON schemas, and sends `tools/call` when the model asks for one. It is the tool loop of 11.1
+with the tools moved into another process, so a tool written once serves every MCP client (this application, Claude Code, an IDE).
+
+| | Local `@Tool` (11.1 to 11.3) | MCP tool (11.4) |
+|---|---|---|
+| Where the tool runs | in this application | in another process, over HTTP |
+| Who owns the code and the schema | this application | the server; the client only discovers it |
+| Discovered | at startup, from annotations | at first use, with `tools/list` |
+| Fails when | the tool throws | the tool throws, or the server is down or slow |
+| Other clients can use it | no | yes, any MCP client |
+
+**Two modules.**
+
+- `spring-ai-mcp-server-training` (port 8090): `spring-ai-starter-mcp-server-webmvc`, streamable HTTP at `/mcp`, synchronous. Two toy
+  tools written with the same `@Tool` annotation as before, on `ClockTools` (`currentTime(zoneId)`) and `MathTools` (`add(a, b)`, exact
+  `BigDecimal`). `ToolsConfig` publishes them as one `ToolCallbackProvider` bean; the server autoconfiguration turns every such bean into
+  MCP tools, so adding a tool is adding a component to that list. No model, no database.
+- `spring-ai-training` (this module): `spring-ai-starter-mcp-client` (plain `java.net.http`, no WebFlux) with one connection,
+  `spring.ai.mcp.client.streamable-http.connections.training-tools`. The starter publishes the remote tools as one `ToolCallbackProvider`
+  bean; the `mcp` feature offers them to the central `ChatClient` on its calls only (`.toolCallbacks(...)`), wrapped in the assistant's
+  `RecordingToolCallback` so the response lists the calls.
+
+**Endpoints** (this module):
+
+| Endpoint | Does | Statuses |
+|---|---|---|
+| `GET /api/v1/mcp/tools` | asks the server what it offers: name, description, input schema | 200, 502 server unreachable |
+| `POST /api/v1/mcp/answers` `{"question": ...}` | answers with the server's tools, lists the calls | 200, 400, 502 server or model unreachable |
+
+**Run both** (Oracle is not needed by the server; the client still needs the compose Oracle and, on the `local` profile, Ollama):
+
+```
+./mvnw -pl spring-ai-mcp-server-training spring-boot:run
+./mvnw -pl spring-ai-training spring-boot:run "-Dspring-boot.run.arguments=--server.port=8081"
+
+curl localhost:8081/api/v1/mcp/tools
+curl -X POST localhost:8081/api/v1/mcp/answers -H "Content-Type: application/json" \
+     -d "{\"question\": \"What time is it in Athens right now, and what is 19.99 plus 0.01?\"}"
+```
+
+**Live** (`qwen3.5:4b`, `local`, port 8081, server on 8090):
+
+| Question | Tool calls (over HTTP) | Answer |
+|---|---|---|
+| What time is it in Athens right now, and what is 19.99 plus 0.01? | `currentTime {"zoneId":"Europe/Athens"}` 51 ms, `add {"a":19.99,"b":0.01}` 14 ms | "16:38 in Athens, and 19.99 plus 0.01 equals 20.00" (1,346 prompt tokens) |
+| What time is it in Mars/Olympus? | `currentTime` with an unknown zone: error | the model reports it could not get the time |
+| What is the capital of France? | none | Paris |
+| any question, server stopped | none | `502`, "The MCP server is unavailable, try again later" |
+| the same question after the server is back | as normal | works, no restart of this application |
+
+**Design notes and pitfalls.**
+
+| Pitfall | Here |
+|---|---|
+| The client initializes its connections at startup, so this application would not start while the server is down | `spring.ai.mcp.client.initialized: false`: it starts, connects on first use, and a request that needs a dead server gets a `502` |
+| The tool list is cached once read | a server that dies later is noticed by the failing tool call, not by the listing; a tools-changed notification from the server refreshes it |
+| A remote tool that reports an error reaches the model as "the tool failed unexpectedly" | the client throws with the server's message buried in a generic text that `ToolErrorProcessor` does not parse; the model does not invent a result, but it does not get the server's own message either (it is in the log). A parser or a wrapping callback would fix it |
+| Two `ToolCallbackProvider` beans | the feature takes the provider with `getIfUnique()`; a second provider bean would make it answer "no MCP client is configured" |
+| The SDK's own annotation scanning (`@McpTool`, `@McpLogging`) logs "No tool methods found" | switched off on both sides (`annotation-scanner.enabled: false`): the tools here are Spring AI `@Tool` methods |
+| The server's port | 8090, so it can run next to this application; the streamable HTTP endpoint is `/mcp` |
+| Tool arguments are typed by the schema | `add(BigDecimal, BigDecimal)` is a JSON `number`; a string `"19.99"` is rejected by the server's own schema validation before the tool runs |
+
+**Tests.**
+
+- Server: `ToolsTest` (4: zone conversion, UTC default, unknown zone message, exact decimal sum), `McpServerIT` (3, real port, the MCP Java
+  SDK's own client: initialize and list both tools with descriptions and schemas, call `add`, a failing `currentTime` comes back as an
+  error result, not an exception).
+- Client: `McpControllerTest` (5: the tool list, `502` for an unreachable server, the answer with tool calls, `502` for a failing model,
+  `400` for a blank question) and `McpApiIT` (6: scripted model, stub `ToolCallbackProvider` standing in for the MCP client; lists the
+  tools, a call round trip with the definitions in the first prompt, a failing remote tool recorded and passed to the model, no tool when
+  none is needed, a dead server is a `502` and the model is not called, a failing model is a `502`). The MCP client is off in the `test`
+  profile, so `verify` never needs the server; the wire itself is `McpServerIT` plus the live run above.

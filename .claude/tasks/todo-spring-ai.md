@@ -110,7 +110,7 @@ own module — no code here should be required for the Spring Boot units to buil
   demo showing the model receiving a validation error back.
 - [x] **11.3 Error handling** — a tool that can fail (e.g. an external lookup), translated into a
   model-legible error response rather than an unhandled exception.
-- [ ] **11.4 MCP client / server basics** — scaffold `spring-ai-mcp-server-training` (Spring AI MCP
+- [x] **11.4 MCP client / server basics** — scaffold `spring-ai-mcp-server-training` (Spring AI MCP
   server starter, HTTP transport, one or two toy tools), then an MCP client in `spring-ai-training`
   (Spring AI MCP client starter, HTTP) that calls it. Run both concurrently and demo the round trip.
 
@@ -773,3 +773,15 @@ own module — no code here should be required for the Spring Boot units to buil
 - README: "Memory for the shop assistant" section after 11.3.
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-ai-training: 206 unit/slice + 63 IT, 0
   failures; spring-boot-training 75 + 66). Compose restarted afterwards with the `ai` and `observability` profiles.
+
+### 11.4 MCP client / server basics (done)
+
+- Decisions (approved plan, `.claude/tasks/plan-11.4.md`): server on 8090, client app on 8081 for the demo, Ollama for the live run; the client starts with the server down and fails a request with a 502 instead.
+- New module `spring-ai-mcp-server-training` (`gr.codelearn.springbootai.ai.mcp`, registered in the parent `<modules>`): `spring-ai-starter-mcp-server-webmvc`, `protocol: STREAMABLE`, `/mcp`, sync. `ClockTools.currentTime(zoneId)` and `MathTools.add(a, b)` are plain `@Tool` components, published by `ToolsConfig` as one `ToolCallbackProvider`. No model, no database.
+- Client in `spring-ai-training`: `spring-ai-starter-mcp-client`, one `streamable-http` connection (`training-tools`), `initialized: false`. New `mcp` feature: `McpController` (`GET /api/v1/mcp/tools`, `POST /api/v1/mcp/answers`), `McpService` (takes the starter's `ToolCallbackProvider` with `getIfUnique()`, offers it to the central `ChatClient` per call, records calls), records, `McpServerUnavailableException` (502 in `ApiExceptionHandler`). `RecordingToolCallback` became public and the assistant's `ToolCall` / `TokenUsage` records are reused. The MCP client is off in the `test` profile.
+- Findings (2.0.1, live): the default `initialized: true` fails startup while the server is down; the provider caches the tool list (a server stopped after the first listing still lists) and refreshes on a tools-changed event; `add` takes JSON numbers (a string is rejected by the server's schema check); tool names are unprefixed; `annotation-scanner` logs "No tool methods found" on both sides unless disabled.
+- Known limit (documented, not fixed): a remote tool's error reaches `ToolErrorProcessor` as `Error calling tool: [TextContent[... text=...]]`, so the model is told "failed unexpectedly" and the server's message is only in the log.
+- Live (Ollama GPU, `provider=OLLAMA`, port 8081, server 8090): time in Athens + 19.99 + 0.01 -> both tools called over HTTP (51 ms, 14 ms), correct answer; unknown zone -> error recorded; server stopped -> 502, app restarted with the server down -> starts, 502 until the server is back, then works without a restart. Not run: Anthropic.
+- Tests: server `ToolsTest` (4), `McpServerIT` (3, MCP SDK client over a real port); client `McpControllerTest` (5), `McpApiIT` (6).
+- README: 11.4 section.
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-boot-training 75 + 66; spring-ai-training 211 unit/slice + 69 IT; spring-ai-mcp-server-training 4 + 3, 0 failures).

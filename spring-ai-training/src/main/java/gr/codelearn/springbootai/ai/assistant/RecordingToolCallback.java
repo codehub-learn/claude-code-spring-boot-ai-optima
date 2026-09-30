@@ -20,14 +20,16 @@ import java.util.function.Function;
  * {@code ToolErrorProcessor} makes of it. Since 11.3 the recorded {@code error} is that same text ({@code errorMessage}), not the
  * exception's own message: the response shows what the model was told, and an unexpected exception's detail (SQL, hostnames) reaches
  * neither.
+ *
+ * <p>Public since 11.4: the {@code mcp} feature records its remote tools the same way.
  */
-final class RecordingToolCallback implements ToolCallback {
+public final class RecordingToolCallback implements ToolCallback {
 
 	private final ToolCallback delegate;
 	private final List<ToolCall> calls;
 	private final Function<Throwable, String> errorMessage;
 
-	RecordingToolCallback(final ToolCallback delegate, final List<ToolCall> calls, final Function<Throwable, String> errorMessage) {
+	public RecordingToolCallback(final ToolCallback delegate, final List<ToolCall> calls, final Function<Throwable, String> errorMessage) {
 		this.delegate = delegate;
 		this.calls = calls;
 		this.errorMessage = errorMessage;

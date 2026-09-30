@@ -3,6 +3,7 @@ package gr.codelearn.springbootai.ai.config.web;
 import gr.codelearn.springbootai.ai.common.ChatModelUnavailableException;
 import gr.codelearn.springbootai.ai.common.InvalidModelOutputException;
 import gr.codelearn.springbootai.ai.conversation.ConversationNotFoundException;
+import gr.codelearn.springbootai.ai.mcp.McpServerUnavailableException;
 import gr.codelearn.springbootai.ai.product.ProductNotFoundException;
 
 import org.slf4j.Logger;
@@ -46,6 +47,12 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 	ProblemDetail handleChatModelUnavailable(final ChatModelUnavailableException ex) {
 		// The cause carries the provider detail (connection refused, HTTP status); never the prompt itself.
 		log.warn("Chat model call failed: {}", ex.getMessage(), ex.getCause());
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
+	}
+
+	@ExceptionHandler(McpServerUnavailableException.class)
+	ProblemDetail handleMcpServerUnavailable(final McpServerUnavailableException ex) {
+		// The cause (connection refused, timeout) was logged where it happened; the caller gets the generic sentence.
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
 	}
 
