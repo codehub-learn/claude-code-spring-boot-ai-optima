@@ -48,7 +48,7 @@ class McpServerIT {
 	void listsBothToolsWithDescriptionsAndSchemas() {
 		final var tools = client.listTools().tools();
 
-		assertThat(tools).extracting(Tool::name).containsExactlyInAnyOrder("currentTime", "add");
+		assertThat(tools).extracting(Tool::name).containsExactlyInAnyOrder("currentTime", "add", "searchWikipedia");
 		assertThat(tools).allSatisfy(tool -> {
 			assertThat(tool.description()).isNotBlank();
 			assertThat(tool.inputSchema()).isNotNull();

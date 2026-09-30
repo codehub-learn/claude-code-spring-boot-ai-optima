@@ -785,3 +785,10 @@ own module — no code here should be required for the Spring Boot units to buil
 - Tests: server `ToolsTest` (4), `McpServerIT` (3, MCP SDK client over a real port); client `McpControllerTest` (5), `McpApiIT` (6).
 - README: 11.4 section.
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-boot-training 75 + 66; spring-ai-training 211 unit/slice + 69 IT; spring-ai-mcp-server-training 4 + 3, 0 failures).
+
+### 11.4 follow-up: searchWikipedia tool (on request)
+
+- User request: "add an extra tool that searches online for something (you propose)". Proposal taken: Wikipedia search through the MediaWiki action API (no key), in the MCP server.
+- `WikipediaTools.searchWikipedia(query)`: best 3 articles (rank order, intro cut at 500 chars, link); no match is an answer, a failure is one plain sentence (MCP error result). `WikipediaProperties` (`app.wikipedia.*`, timeouts 2 s / 5 s), a `wikipediaClient` `RestClient` with a User-Agent, published in `ToolsConfig`. Deviation from the 11.4 text ("one or two toy tools"): a third tool, at the user's request.
+- Tests: `WikipediaToolsTest` (5, `MockRestServiceServer`), `McpServerIT` now expects three tools. Server module `verify`: 9 unit + 3 IT, 0 failures. The full reactor was not rerun (the client module is unchanged).
+- Live (Ollama, real Wikipedia): two `searchWikipedia` calls over MCP (989 ms, 379 ms), answer Rod Johnson / 2003, plus an unverified extra paragraph. Not run: Anthropic; the User-Agent header is only exercised live.

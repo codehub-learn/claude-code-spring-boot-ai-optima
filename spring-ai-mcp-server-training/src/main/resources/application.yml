@@ -13,7 +13,9 @@ spring:
         # STREAMABLE serves one endpoint (below); SSE is the older two-endpoint transport, STDIO is for a client that launches the process.
         type: SYNC
         protocol: STREAMABLE
-        instructions: Toy tools for the Spring AI training. currentTime gives the time in a time zone, add sums two decimal numbers exactly.
+        instructions: >-
+          Tools for the Spring AI training. currentTime gives the time in a time zone, add sums two decimal numbers exactly,
+          searchWikipedia looks facts up online.
         streamable-http:
           mcp-endpoint: /mcp
         annotation-scanner:
@@ -24,6 +26,17 @@ spring:
 server:
   # Not 8080: spring-ai-training (the MCP client) runs next to this server.
   port: 8090
+
+# Application-owned settings, bound to validated records (tools.WikipediaProperties).
+app:
+  wikipedia:
+    # The searchWikipedia tool: the MediaWiki site to search, without a path. Another language edition works too (https://el.wikipedia.org).
+    base-url: https://en.wikipedia.org
+    # Without timeouts a slow Wikipedia holds the MCP call, and the model's tool loop behind it, for as long as it likes.
+    connect-timeout: 2s
+    read-timeout: 5s
+    # Articles per search. Each one adds up to ~500 characters of intro to what the model has to read.
+    max-results: 3
 
 management:
   endpoints:

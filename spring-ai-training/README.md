@@ -1964,10 +1964,10 @@ with the tools moved into another process, so a tool written once serves every M
 
 **Two modules.**
 
-- `spring-ai-mcp-server-training` (port 8090): `spring-ai-starter-mcp-server-webmvc`, streamable HTTP at `/mcp`, synchronous. Two toy
-  tools written with the same `@Tool` annotation as before, on `ClockTools` (`currentTime(zoneId)`) and `MathTools` (`add(a, b)`, exact
-  `BigDecimal`). `ToolsConfig` publishes them as one `ToolCallbackProvider` bean; the server autoconfiguration turns every such bean into
-  MCP tools, so adding a tool is adding a component to that list. No model, no database.
+- `spring-ai-mcp-server-training` (port 8090): `spring-ai-starter-mcp-server-webmvc`, streamable HTTP at `/mcp`, synchronous. Three
+  tools written with the same `@Tool` annotation as before: `ClockTools.currentTime(zoneId)`, `MathTools.add(a, b)` (exact `BigDecimal`)
+  and `WikipediaTools.searchWikipedia(query)` (see below). `ToolsConfig` publishes them as one `ToolCallbackProvider` bean; the server
+  autoconfiguration turns every such bean into MCP tools, so adding a tool is adding a component to that list. No model, no database.
 - `spring-ai-training` (this module): `spring-ai-starter-mcp-client` (plain `java.net.http`, no WebFlux) with one connection,
   `spring.ai.mcp.client.streamable-http.connections.training-tools`. The starter publishes the remote tools as one `ToolCallbackProvider`
   bean; the `mcp` feature offers them to the central `ChatClient` on its calls only (`.toolCallbacks(...)`), wrapped in the assistant's
@@ -2001,6 +2001,17 @@ curl -X POST localhost:8081/api/v1/mcp/answers -H "Content-Type: application/jso
 | any question, server stopped | none | `502`, "The MCP server is unavailable, try again later" |
 | the same question after the server is back | as normal | works, no restart of this application |
 
+**A tool that reaches the internet: `searchWikipedia(query)`.** A model has no web access; this tool searches Wikipedia through the
+MediaWiki action API (`generator=search`, intro extracts, no API key) and returns the best 3 articles as title, intro (cut at 500
+characters) and link, in search rank. Why it belongs in an MCP server: the network access, the timeouts and the parsing live in one
+place and every MCP client gets them. Configuration is `app.wikipedia.*` (`WikipediaProperties`: `base-url`, `connect-timeout` 2 s,
+`read-timeout` 5 s, `max-results` 3), the HTTP client is a `RestClient` bean with those timeouts and a `User-Agent` that identifies the
+application (Wikipedia asks API clients to). A failure (down, slow, unexpected answer) throws one plain sentence, which the MCP server
+sends to the client as an error result; no match is an answer, not an error. Live (`qwen3.5:4b`): "Who created the Spring Framework and
+in what year was version 1.0 released? Search Wikipedia." made two `searchWikipedia` calls over MCP (989 ms and 379 ms, 3,025 prompt
+tokens) and answered Rod Johnson, 2003. The answer also added a paragraph about a book by Rod Johnson that was not checked against the tool
+result: a small model can embellish around a tool result, so read the recorded `toolCalls`, not just the prose.
+
 **Design notes and pitfalls.**
 
 | Pitfall | Here |
@@ -2015,8 +2026,9 @@ curl -X POST localhost:8081/api/v1/mcp/answers -H "Content-Type: application/jso
 
 **Tests.**
 
-- Server: `ToolsTest` (4: zone conversion, UTC default, unknown zone message, exact decimal sum), `McpServerIT` (3, real port, the MCP Java
-  SDK's own client: initialize and list both tools with descriptions and schemas, call `add`, a failing `currentTime` comes back as an
+- Server: `ToolsTest` (4: zone conversion, UTC default, unknown zone message, exact decimal sum), `WikipediaToolsTest` (5, mock server, no
+  network: results in search rank with intro and link, a long intro cut, no match, a Wikipedia failure as a sentence, empty and oversized
+  queries), `McpServerIT` (3, real port, the MCP Java SDK's own client: initialize and list the three tools with descriptions and schemas, call `add`, a failing `currentTime` comes back as an
   error result, not an exception).
 - Client: `McpControllerTest` (5: the tool list, `502` for an unreachable server, the answer with tool calls, `502` for a failing model,
   `400` for a blank question) and `McpApiIT` (6: scripted model, stub `ToolCallbackProvider` standing in for the MCP client; lists the
