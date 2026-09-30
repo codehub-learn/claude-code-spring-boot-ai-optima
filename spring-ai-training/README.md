@@ -1864,3 +1864,86 @@ the stub under `/api/{version}/` like every controller, and to test it with `@We
   postcode; an unexpected `IllegalStateException` leaks neither to the model nor to the caller; an unknown product never asks the
   carrier; a bad postcode is rejected before the carrier.
 - `AssistantApiIT` (4): the assistant now offers three tools; the recorded validation error is the model-facing text.
+
+### Memory for the shop assistant (follow-up to 11.1 to 11.3)
+
+**The problem.** `POST /api/v1/assistant/answers` was stateless: every message started from nothing, so "which of those is the cheapest?"
+or "and delivery to 10431?" had no "those" or "it" to refer to. The memory built in 9.2 was only reachable through
+`/api/v1/conversations`.
+
+**The fix: the assistant runs as a turn of a conversation.**
+
+```bash
+# the first message starts a conversation and returns its id (and sets a cookie)
+curl -c jar.txt -X POST localhost:8080/api/v1/assistant/answers -H 'Content-Type: application/json' \
+     -d '{"question": "Which laptops do you have under 1500 EUR?"}'                  # -> {"conversationId": "0b7f...", ...}
+# continue it: with the cookie jar, or with the id in the body
+curl -b jar.txt -c jar.txt -X POST localhost:8080/api/v1/assistant/answers -H 'Content-Type: application/json' \
+     -d '{"question": "Which of those is the cheapest?"}'
+curl -X POST localhost:8080/api/v1/assistant/answers -H 'Content-Type: application/json' \
+     -d '{"question": "Which of those is the cheapest?", "conversationId": "0b7f..."}'
+curl localhost:8080/api/v1/conversations/0b7f.../messages                            # what it remembers
+curl -b jar.txt -c jar.txt -X DELETE localhost:8080/api/v1/assistant/conversation    # forget it, start over
+```
+
+**Swagger UI and IntelliJ's HTTP client need no id.** Every answer sets an `assistant-conversation` cookie (`HttpOnly`,
+`SameSite=Lax`, session cookie, limited to `/api/v1/assistant`, `Secure` over HTTPS) holding the conversation's id, and the browser sends
+it back by itself. A client that keeps no cookies (plain `curl`) has to pass the id. Without this, "Execute" in Swagger UI started a new
+conversation every time: the request body has no id unless you paste it, and the server cannot guess which earlier request a new one
+continues.
+
+| Request | What happens |
+|---|---|
+| `conversationId` in the body | that conversation continues; it wins over the cookie |
+| no id, but the cookie | the cookie's conversation continues; a cookie whose conversation is gone (or that is not a UUID) is ignored |
+| neither | a new conversation starts, its id is in the answer and in the cookie; if that first message fails, it is removed again |
+| an unknown id in the body | `404`, the model is not called |
+| `DELETE /api/v1/assistant/conversation` | deletes the cookie's conversation and its memory, clears the cookie |
+| the model fails | `502`, and the memory is as it was before the message (as in 9.2) |
+
+**How it is wired.** `ConversationService` (9.2) gained a public `chat(id, prompt)`: the caller adds what its call needs (system text,
+user message, tools) to the request spec, and the service adds the conversation: existence check, one turn at a time per conversation,
+`MessageChatMemoryAdvisor` with the id, rollback on failure, turn count. The conversation feature's own `send` is the same path with a
+plain user message. `AssistantService` does not know how memory works.
+
+**Two consequences of what memory stores** (the advisor saves the user message and the final answer):
+
+- **The shop instructions moved into the system prompt.** They used to be a template around the question in the user message
+  (`question.st`); memory would have saved that whole block with every turn, sent it again in every later prompt (the window keeps 20
+  messages) and shown it in `GET .../messages`. Now `prompts/assistant/instructions.st` is appended to `chat-system.st` in the system
+  message (a per-call `.system(...)` replaces the default text, so the default is repeated in it), and the user message is the question as
+  typed. Stored: `[user "Which laptops...", assistant "We have two laptops..."]`.
+- **Tool calls and their results are not remembered.** The memory advisor sits outside the tool loop (order +200, the tool calling
+  advisor +300), so it sees the question and the final answer only. A follow-up that needs fresh data has the model call the tool
+  again, which the instructions ask for ("call a tool again when the answer needs fresh data"). That is also why prices and delivery
+  estimates in an old answer are never trusted as current.
+
+**Live** (`qwen3.5:4b`, `local`, port 8081, stub carrier):
+
+| Message | Tool calls | Answer |
+|---|---|---|
+| Which laptops do you have under 1500 euro? | `searchProducts {"keywords":"laptop","maxPrice":1500}` | LAP-0003 1099, LAP-0001 1299 |
+| Which of those is the cheapest, and what does it cost? | none (1,294 prompt tokens, answered from memory) | LAP-0003, 1099 |
+| And how long would delivery take to 10431? | `estimateDelivery {"sku":"LAP-0003","postcode":"10431"}` | 3 working days, 4.90 |
+| What about delivery to 50000 instead? | `estimateDelivery` for LAP-0003 again, carrier down | "currently unavailable ... try again later" |
+
+"Those", "it" and "instead" were all resolved from memory, the product carried over to the delivery question, and the history holds
+8 messages, questions and answers only.
+
+**Pitfalls.**
+
+| Pitfall | Here |
+|---|---|
+| A memory advisor stores the user message it is given, instructions included | instructions in the system prompt, the question alone in the user message |
+| Tool messages are not in memory | fresh-data rule in the instructions; the model calls the tool again |
+| A per-call `.system(...)` replaces the default system text | the default text is repeated in the assistant's system text |
+| A conversation started for a message that then fails | removed again, so failed first messages leave no rows |
+| The window is a count, not a topic | after 20 messages the oldest are forgotten by the model and by `GET .../messages` alike |
+
+**Tests.** `AssistantApiIT` (now 13): a cookie from one answer continues the conversation with no id in the body, and a cookie for a
+deleted conversation starts a new one; the system prompt holds the shop instructions and the user message is only the question; a
+follow-up's first round is system, question, answer, new question; memory holds the question and the answer only (no instructions, no
+tool messages); each message without an id starts its own conversation; an unknown id is a `404` and the model is not called; a failed
+first message leaves no conversation behind; a failed follow-up leaves the memory as it was. `AssistantControllerTest` (12): the id is
+passed on and returned, an unknown one is a `404`, a malformed one a `400`; the answer sets a scoped `HttpOnly` session cookie, the cookie
+continues the conversation, an id in the body wins, a stale or malformed cookie is ignored, and `DELETE` clears it.

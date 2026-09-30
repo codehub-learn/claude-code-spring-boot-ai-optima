@@ -727,7 +727,7 @@ own module — no code here should be required for the Spring Boot units to buil
   (malformed arguments), `ModelReadableException`, and anything else gets a generic "do not guess" message with the exception logged.
   `describe(Throwable)` is the same text without logging; `RecordingToolCallback` records it, so `toolCalls[].error` is what the model was
   told (an unexpected exception's message reaches neither the model nor the caller). `AssistantService` offers the catalog and the
-  delivery tools; `question.st` says what to do on an error.
+  delivery tools; `question.st` (since moved to `instructions.st`, see the memory follow-up) says what to do on an error.
 - Findings: `ToolExecutionException`'s cause chain holds `MismatchedInputException` / `StreamReadException` for bad arguments (both
   `tools.jackson.core.JacksonException`); `RetryTemplate.invoke` rethrows the last runtime exception; `.tools(...)` of the assistant
   now has three tools (`AssistantApiIT` asserts them).
@@ -744,3 +744,32 @@ own module — no code here should be required for the Spring Boot units to buil
   tests); 11.2's processor name and error note updated.
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-ai-training: 197 unit/slice + 54 IT, 0
   failures; spring-boot-training 75 + 66). The compose stack was restarted afterwards with the `ai` and `observability` profiles.
+
+### Assistant memory (follow-up to 11.1 to 11.3, on request)
+
+- User request: "cannot have a conversation as every prompt starts all over, hook conversation memory to assistance service".
+- Decisions: optional `conversationId` on `AssistantRequest`; omitted, a new conversation starts and its id comes back in
+  `AssistantResponse.conversationId` (removed again if its first turn fails). Unknown id: `404` (existing handler).
+- `ConversationService` is public with `start()`, `chat(UUID, UnaryOperator<ChatClientRequestSpec>)` and `delete(UUID)`;
+  `ConversationNotFoundException`'s constructor is public. `send` and `chat` share one private `run` (exists check, per-conversation
+  lock, memory advisor + id, rollback on failure, turn count). `AssistantService` no longer holds a `ChatClient`.
+- The shop instructions moved from the user message (`question.st`, now `instructions.st`) to the system prompt, appended to
+  `chat-system.st` (per-call `.system(...)` replaces the default text): otherwise memory would store the instruction block with every
+  turn. The user message is the question as typed.
+- Findings (2.0.1): the memory advisor (`DEFAULT_CHAT_MEMORY_PRECEDENCE_ORDER`, +200) is outside the tool calling advisor (+300), so
+  memory holds the question and the final answer only, not tool calls or results; a follow-up needing fresh data calls the tool again.
+- Live (`local`, port 8081, qwen3.5:4b): 4 messages in one conversation: "those", "it" and "instead" resolved; the second answer needed no
+  tool call (1,294 prompt tokens); history has 8 messages, questions and answers only. Not run: Anthropic.
+- Tests: `AssistantApiIT` 11 (7 new: system prompt, follow-up history order, memory content, new conversation per message, unknown id
+  404, failed first message leaves nothing, failed follow-up keeps memory), `AssistantControllerTest` 5 (2 new).
+- Follow-up: the user's requests reached the API without a `conversationId` (Swagger UI: nothing to paste, so every "Execute" was a new
+  conversation; the log showed a new id each time). Decision (asked: Swagger UI / IntelliJ HTTP client): every answer sets an
+  `assistant-conversation` cookie (`HttpOnly`, `SameSite=Lax`, session, path `/api/v1/assistant`, `Secure` over HTTPS) and a message
+  without an id continues the cookie's conversation: body id, then cookie, then a new one. A stale or malformed cookie is ignored.
+  `DELETE /api/v1/assistant/conversation` deletes the conversation and clears the cookie. Clients without cookies (curl) still pass the id.
+- Live: curl with a cookie jar, no id in the body: both messages in one conversation id; `DELETE` answered `204` with `Max-Age=0`. The
+  first answer of that run wrongly said "no laptops under 1500" (a 4B-model tool-call flake; an earlier run found two). Swagger UI itself
+  was not driven. Tests: `AssistantControllerTest` 12, `AssistantApiIT` 13.
+- README: "Memory for the shop assistant" section after 11.3.
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-ai-training: 206 unit/slice + 63 IT, 0
+  failures; spring-boot-training 75 + 66). Compose restarted afterwards with the `ai` and `observability` profiles.

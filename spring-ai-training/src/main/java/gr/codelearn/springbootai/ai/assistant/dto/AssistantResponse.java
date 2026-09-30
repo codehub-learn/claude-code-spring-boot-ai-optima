@@ -4,16 +4,19 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Unit 11.1: the assistant's answer and what it did to get there.
  *
- * @param content   the answer
- * @param toolCalls every tool call the model made, in order; empty when it answered without tools
- * @param model     the model that wrote it, as reported by the provider ({@code null} if it did not say)
- * @param usage     token counts summed over every round of the tool loop (each round resends the whole conversation)
+ * @param conversationId the conversation this message belongs to: the one sent, or the new one; send it again to continue
+ * @param content        the answer
+ * @param toolCalls      every tool call the model made, in order; empty when it answered without tools
+ * @param model          the model that wrote it, as reported by the provider ({@code null} if it did not say)
+ * @param usage          token counts summed over every round of the tool loop (each round resends the whole conversation)
  */
 public record AssistantResponse(
+		@Schema(description = "The conversation; send it with the next message") UUID conversationId,
 		@Schema(description = "The answer") String content,
 		@Schema(description = "The tool calls the model made, in order") List<ToolCall> toolCalls,
 		@Schema(description = "The model that produced it", example = "qwen3.5:4b") @Nullable String model,

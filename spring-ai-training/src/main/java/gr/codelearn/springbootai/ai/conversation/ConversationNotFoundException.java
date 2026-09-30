@@ -8,7 +8,7 @@ import java.util.UUID;
  */
 public class ConversationNotFoundException extends RuntimeException {
 
-	ConversationNotFoundException(final UUID id) {
+	public ConversationNotFoundException(final UUID id) {
 		super("No conversation with id " + id);
 	}
 }

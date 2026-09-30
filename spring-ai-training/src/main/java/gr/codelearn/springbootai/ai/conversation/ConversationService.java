@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
 
 /**
@@ -54,9 +55,13 @@ import java.util.stream.IntStream;
  * other). The lock is in this JVM only: two instances of the app could interleave turns on the same conversation. The memory itself is in
  * the database, so it survives a restart and is visible to every instance. No {@code @Transactional}: each repository call commits on its
  * own, and no connection is held while the model answers.
+ *
+ * <p>Unit 11 follow-up: the shop assistant (Unit 11.1) needs the same memory, so {@link #start()}, {@link #chat} and {@link #delete} are
+ * public: another feature runs its own model call as a turn of a conversation (exists check, lock, memory, rollback, turn count) without
+ * knowing how memory works. The conversation feature's own {@link #send} is that same path with a plain user message.
  */
 @Service
-class ConversationService {
+public class ConversationService {
 
 	static final int LOCK_STRIPES = 64;
 
@@ -78,19 +83,43 @@ class ConversationService {
 		this.conversationRepository = conversationRepository;
 	}
 
+	/**
+	 * A new, empty conversation; returns its id.
+	 */
+	public UUID start() {
+		return create().id();
+	}
+
 	ConversationResponse create() {
 		final Conversation conversation = conversationRepository.save(Conversation.start(UUID.randomUUID(), Instant.now()));
 		return new ConversationResponse(UUID.fromString(conversation.id()), conversation.createdAt());
 	}
 
 	ConversationReplyResponse send(final UUID id, final ConversationMessageRequest request) {
+		final Turn turn = run(id, prompt -> prompt.system(SystemPromptParams::fill).user(request.content()));
+		return toReply(id, turn.number(), turn.response());
+	}
+
+	/**
+	 * One turn of conversation {@code id} for a caller with its own prompt: {@code prompt} gets the request spec and adds what the call
+	 * needs (system text, the user message, tools); this service adds the memory. Same guarantees as {@link #send}: turns on one
+	 * conversation run one at a time, the remembered messages are put before the new one, and a failed call leaves the memory as it was.
+	 *
+	 * @throws ConversationNotFoundException no conversation has this id
+	 * @throws ChatModelUnavailableException the model call failed or returned nothing
+	 */
+	public ChatResponse chat(final UUID id, final UnaryOperator<ChatClient.ChatClientRequestSpec> prompt) {
+		return run(id, prompt).response();
+	}
+
+	private Turn run(final UUID id, final UnaryOperator<ChatClient.ChatClientRequestSpec> prompt) {
 		final ReentrantLock lock = lockFor(id);
 		lock.lock();
 		try {
 			final Conversation conversation = find(id);
-			final ChatResponse response = call(conversation.id(), request.content());
+			final ChatResponse response = call(conversation.id(), prompt);
 			final Conversation counted = conversationRepository.save(conversation.withNextTurn());
-			return toReply(id, counted.turns(), response);
+			return new Turn(response, counted.turns());
 		} finally {
 			lock.unlock();
 		}
@@ -101,7 +130,7 @@ class ConversationService {
 		return chatMemory.get(conversation.id()).stream().map(ConversationService::toMessageResponse).toList();
 	}
 
-	void delete(final UUID id) {
+	public void delete(final UUID id) {
 		final ReentrantLock lock = lockFor(id);
 		lock.lock();
 		try {
@@ -121,18 +150,16 @@ class ConversationService {
 		return locks.get(Math.floorMod(id.hashCode(), LOCK_STRIPES));
 	}
 
-	private ChatResponse call(final String conversationId, final String content) {
+	private ChatResponse call(final String conversationId, final UnaryOperator<ChatClient.ChatClientRequestSpec> prompt) {
 		final List<Message> before = chatMemory.get(conversationId);
 		final ChatResponse response;
 		try {
-			response = chatClient.prompt()
-								 .system(SystemPromptParams::fill)
-								 .user(content)
-								 .advisors(
-					                     advisors -> advisors.advisors(chatMemoryAdvisor).param(ChatMemory.CONVERSATION_ID,
-																								conversationId))
-								 .call()
-								 .chatResponse();
+			response = prompt.apply(chatClient.prompt())
+							 .advisors(
+									 advisors -> advisors.advisors(chatMemoryAdvisor).param(ChatMemory.CONVERSATION_ID,
+																							conversationId))
+							 .call()
+							 .chatResponse();
 		} catch (RuntimeException ex) {
 			chatMemoryRepository.saveAll(conversationId, before);
 			throw new ChatModelUnavailableException(UNAVAILABLE, ex);
@@ -142,6 +169,9 @@ class ConversationService {
 			throw new ChatModelUnavailableException("The chat model returned no result", null);
 		}
 		return response;
+	}
+
+	private record Turn(ChatResponse response, int number) {
 	}
 
 	private static ConversationReplyResponse toReply(final UUID id, final int turn, final ChatResponse response) {

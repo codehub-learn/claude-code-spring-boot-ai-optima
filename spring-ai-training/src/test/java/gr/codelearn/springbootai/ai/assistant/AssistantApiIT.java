@@ -2,6 +2,8 @@ package gr.codelearn.springbootai.ai.assistant;
 
 import gr.codelearn.springbootai.ai.support.AbstractOracleIntegrationTest;
 
+import com.jayway.jsonpath.JsonPath;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -22,9 +24,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -44,6 +49,11 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 
 	@Autowired
 	private ScriptedModel model;
+
+	@Autowired
+	private JdbcClient jdbcClient;
+
+	private String lastAnswer;
 
 	@BeforeEach
 	void reset() {
@@ -90,7 +100,7 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 																		   {"name": "getProduct", "arguments": "{\\"input\\":{\\"sku\\":\\"LAP-0002\\"}}", "error": null}]}""");
 		assertThat(response).bodyJson().extractingPath("$.toolCalls[0].error").asString()
 							.isEqualTo("Invalid arguments, the tool did not run: sku must be letters, a dash and digits, like LAP-0002. "
-							   + "Fix the arguments and call the tool again.");
+									   + "Fix the arguments and call the tool again.");
 		assertThat(response).bodyJson().extractingPath("$.content").asString().startsWith("Tool said: {\"sku\":\"LAP-0002\"");
 
 		// The model saw the rejection as the tool's result, in words, and the catalog was not queried for "blue laptop".
@@ -99,6 +109,128 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 		assertThat(rejection.getResponses().getFirst().responseData())
 				.isEqualTo("Invalid arguments, the tool did not run: sku must be letters, a dash and digits, like LAP-0002. "
 						   + "Fix the arguments and call the tool again.");
+	}
+
+	@Test
+	void theShopInstructionsAreTheSystemPromptAndTheUserMessageIsJustTheQuestion() {
+		ask("What is the capital of France?").exchange();
+
+		final Prompt prompt = model.prompts.getFirst();
+		assertThat(prompt.getSystemMessage().getText()).contains("You are the Code.Learn training assistant")
+													   .contains("shop assistant of an electronics store")
+													   .contains("estimateDelivery")
+													   .doesNotContain("{today}");
+		assertThat(prompt.getUserMessage().getText()).isEqualTo("What is the capital of France?");
+	}
+
+	@Test
+	void aFollowUpInTheSameConversationSeesTheEarlierMessages() {
+		final var first = ask("What does LAP-0002 cost?").exchange();
+		final String conversation = conversationOf(first);
+		final int roundsSoFar = model.prompts.size();
+
+		final var second = ask("And what about AUD-9999?", conversation).exchange();
+
+		assertThat(conversationOf(second)).isEqualTo(conversation);
+		// The second turn's first round: system, then what was said before (question + answer), then the new question.
+		final Prompt followUp = model.prompts.get(roundsSoFar);
+		assertThat(followUp.getInstructions()).extracting(Message::getMessageType).map(Enum::name)
+											  .containsExactly("SYSTEM", "USER", "ASSISTANT", "USER");
+		assertThat(followUp.getInstructions().get(1).getText()).isEqualTo("What does LAP-0002 cost?");
+		assertThat(followUp.getInstructions().get(2).getText()).startsWith("Tool said: {\"sku\":\"LAP-0002\"");
+		assertThat(followUp.getUserMessage().getText()).isEqualTo("And what about AUD-9999?");
+	}
+
+	@Test
+	void memoryHoldsTheQuestionsAndTheAnswersNotTheInstructionsOrTheToolMessages() {
+		final String conversation = conversationOf(ask("What does LAP-0002 cost?").exchange());
+
+		final var history = mvc.get().uri("/api/v1/conversations/{id}/messages", conversation).exchange();
+
+		// Two messages: the question as asked (no instruction block) and the final answer (no tool call or tool response message).
+		assertThat(history).hasStatusOk().bodyJson().extractingPath("$.length()").isEqualTo(2);
+		assertThat(history).bodyJson().extractingPath("$[0].role").isEqualTo("user");
+		assertThat(history).bodyJson().extractingPath("$[0].content").isEqualTo("What does LAP-0002 cost?");
+		assertThat(history).bodyJson().extractingPath("$[1].role").isEqualTo("assistant");
+		assertThat(history).bodyJson().extractingPath("$[1].content").isEqualTo(lastAnswer);
+	}
+
+	@Test
+	void theCookieOfAnAnswerContinuesTheConversationWithoutAnyIdInTheBody() {
+		final var first = ask("What does LAP-0002 cost?").exchange();
+		final Cookie cookie = first.getResponse().getCookie("assistant-conversation");
+		assertThat(cookie).isNotNull();
+		assertThat(cookie.getValue()).isEqualTo(conversationOf(first));
+		assertThat(cookie.isHttpOnly()).isTrue();
+		final int roundsSoFar = model.prompts.size();
+
+		// The way Swagger UI or IntelliJ's HTTP client sends the next message: no conversationId, the cookie comes back by itself.
+		final var second = ask("And what about AUD-9999?").cookie(cookie).exchange();
+
+		assertThat(conversationOf(second)).isEqualTo(cookie.getValue());
+		assertThat(model.prompts.get(roundsSoFar).getInstructions()).extracting(Message::getMessageType).map(Enum::name)
+																	.containsExactly("SYSTEM", "USER", "ASSISTANT", "USER");
+	}
+
+	@Test
+	void aCookieForADeletedConversationStartsANewOne() {
+		final var first = ask("What is the capital of France?").exchange();
+		final Cookie cookie = first.getResponse().getCookie("assistant-conversation");
+		assertThat(mvc.delete().uri("/api/v1/assistant/conversation").cookie(cookie)).hasStatus(204);
+		assertThat(mvc.get().uri("/api/v1/conversations/{id}/messages", cookie.getValue())).hasStatus(404);
+
+		final var again = ask("And of Spain?").cookie(cookie).exchange();
+
+		assertThat(conversationOf(again)).isNotEqualTo(cookie.getValue());
+		assertThat(model.prompts.getLast().getInstructions()).extracting(Message::getMessageType).map(Enum::name)
+															 .containsExactly("SYSTEM", "USER");
+	}
+
+	@Test
+	void withoutAConversationIdEachMessageStartsANewConversationWithoutHistory() {
+		final String one = conversationOf(ask("What is the capital of France?").exchange());
+		final String two = conversationOf(ask("And of Spain?").exchange());
+
+		assertThat(two).isNotEqualTo(one);
+		assertThat(model.prompts.getLast().getInstructions()).extracting(Message::getMessageType).map(Enum::name)
+															 .containsExactly("SYSTEM", "USER");
+	}
+
+	@Test
+	void anUnknownConversationIsA404AndTheModelIsNotCalled() {
+		assertThat(ask("Hello again", "6f0d3b0e-0000-4000-8000-000000000000")).hasStatus(404);
+
+		assertThat(model.prompts).isEmpty();
+	}
+
+	@Test
+	void aFailedFirstMessageLeavesNoConversationBehind() {
+		final int before = conversations();
+
+		assertThat(ask("Please explode boom")).hasStatus(502);
+
+		assertThat(conversations()).isEqualTo(before);
+	}
+
+	@Test
+	void aFailedFollowUpLeavesTheMemoryAsItWas() {
+		final String conversation = conversationOf(ask("What is the capital of France?").exchange());
+
+		assertThat(ask("Please explode boom", conversation)).hasStatus(502);
+
+		assertThat(mvc.get().uri("/api/v1/conversations/{id}/messages", conversation)).hasStatusOk().bodyJson()
+																					  .extractingPath("$.length()").isEqualTo(2);
+	}
+
+	private String conversationOf(final MvcTestResult response) {
+		assertThat(response).hasStatusOk();
+		final String body = new String(response.getResponse().getContentAsByteArray(), StandardCharsets.UTF_8);
+		lastAnswer = JsonPath.read(body, "$.content");
+		return JsonPath.read(body, "$.conversationId");
+	}
+
+	private int conversations() {
+		return jdbcClient.sql("select count(*) from conversation").query(Integer.class).single();
 	}
 
 	@Test
@@ -113,6 +245,13 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 				  .uri("/api/v1/assistant/answers")
 				  .contentType(MediaType.APPLICATION_JSON)
 				  .content("{\"question\": \"" + question + "\"}");
+	}
+
+	private MockMvcTester.MockMvcRequestBuilder ask(final String question, final String conversationId) {
+		return mvc.post()
+				  .uri("/api/v1/assistant/answers")
+				  .contentType(MediaType.APPLICATION_JSON)
+				  .content("{\"question\": \"" + question + "\", \"conversationId\": \"" + conversationId + "\"}");
 	}
 
 	@TestConfiguration
@@ -144,6 +283,9 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 				reply = result.startsWith("Invalid arguments") ? getProduct("LAP-0002") : new AssistantMessage("Tool said: " + result);
 			} else {
 				final String question = prompt.getUserMessage().getText();
+				if (question.contains("boom")) {
+					throw new IllegalStateException("the model exploded");
+				}
 				final var sku = java.util.regex.Pattern.compile("[A-Z]{3}-\\d{4}").matcher(question);
 				if (sku.find()) {
 					reply = getProduct(sku.group());
@@ -161,7 +303,7 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 			return AssistantMessage.builder()
 								   .content("")
 								   .toolCalls(List.of(new ToolCall("call-1", "function", "getProduct",
-			                                                       "{\"input\":{\"sku\":\"" + sku + "\"}}")))
+																   "{\"input\":{\"sku\":\"" + sku + "\"}}")))
 								   .build();
 		}
 
