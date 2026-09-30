@@ -115,7 +115,7 @@ spring:
       max-retries: 2
       chat:
         # Claude Sonnet: the cloud model agreed for this curriculum. Only used while spring.ai.model.chat is anthropic.
-        model: claude-sonnet-5
+        model: claude-sonnet-5-5
         # Upper bound on generated tokens per reply; Anthropic requires one on every request.
         max-tokens: 4096
         #        temperature: 0.7
@@ -245,3 +245,14 @@ app:
         active: markdown
         # TokenTextSplitter's target size in tokens. Its default (800) would leave every bundled document in one piece.
         token-chunk-size: 200
+  delivery:
+    carrier:
+      # Unit 11.3: the external carrier service the estimateDelivery tool asks. Production sets the real URL through the environment
+      # (APP_DELIVERY_CARRIER_BASE_URL); this default is the stub carrier that the local profile switches on, on this application's own port.
+      base-url: http://localhost:${server.port:8080}/api/v1/stub-carrier
+      # Without timeouts a hung carrier holds the model's tool loop, and the customer, for as long as it likes.
+      connect-timeout: 1s
+      read-timeout: 2s
+      # Unavailable (5xx, no answer) is asked again this many more times, so 3 attempts. Rate limited and refused are never retried.
+      max-retries: 2
+      retry-delay: 200ms

@@ -108,7 +108,7 @@ own module — no code here should be required for the Spring Boot units to buil
   concrete.
 - [x] **11.2 Validation** — Jakarta Bean Validation on tool-call input records, a rejected-call
   demo showing the model receiving a validation error back.
-- [ ] **11.3 Error handling** — a tool that can fail (e.g. an external lookup), translated into a
+- [x] **11.3 Error handling** — a tool that can fail (e.g. an external lookup), translated into a
   model-legible error response rather than an unhandled exception.
 - [ ] **11.4 MCP client / server basics** — scaffold `spring-ai-mcp-server-training` (Spring AI MCP
   server starter, HTTP transport, one or two toy tools), then an MCP client in `spring-ai-training`
@@ -710,3 +710,37 @@ own module — no code here should be required for the Spring Boot units to buil
   the nested shape.
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-ai-training: 170 unit/slice + 48
   IT, 0 failures). The compose stack was restarted afterwards, including the `ai` and `observability` profiles.
+
+### 11.3 Error handling (done)
+
+- Decisions (approved plan): a **simulated carrier** (stub controller, `local` profile) behind a real HTTP client, and retries. Deviation:
+  retries use Spring Framework 7's built-in `RetryTemplate` (`org.springframework.core.retry`), not the Spring Retry library, so no new
+  dependency (CLAUDE.md lists Spring Retry; the built-in one does the same job).
+- `delivery` feature: `DeliveryTools` (`@Tool estimateDelivery(input{sku, postcode})`, validated, no try/catch), `DeliveryService`
+  (catalog lookup first, then the carrier; not `@Transactional`), `CarrierQuoteClient` (interface) + `HttpCarrierQuoteClient`
+  (`RestClient`, `RetryTemplate`), `DeliveryConfig` (JDK client with connect 1 s / read 2 s), `DeliveryProperties`
+  (`app.delivery.carrier.*`), `StubCarrierController` (`/api/v1/stub-carrier/quotes`, postcode-scripted: 50000 down, 50001 fails once,
+  50002 429, 50003 too slow, 40404 404), DTO records.
+- Shared kernel: `ModelReadableException` (marker: message safe to show a model; `ProductNotFoundException` implements it) and
+  `ExternalServiceException` with `Kind` UNAVAILABLE / RATE_LIMITED / REJECTED, each with the advice the model is given.
+- `ToolValidationExceptionProcessor` renamed `ToolErrorProcessor` (public): validation, external service (message + advice), Jackson
+  (malformed arguments), `ModelReadableException`, and anything else gets a generic "do not guess" message with the exception logged.
+  `describe(Throwable)` is the same text without logging; `RecordingToolCallback` records it, so `toolCalls[].error` is what the model was
+  told (an unexpected exception's message reaches neither the model nor the caller). `AssistantService` offers the catalog and the
+  delivery tools; `question.st` says what to do on an error.
+- Findings: `ToolExecutionException`'s cause chain holds `MismatchedInputException` / `StreamReadException` for bad arguments (both
+  `tools.jackson.core.JacksonException`); `RetryTemplate.invoke` rethrows the last runtime exception; `.tools(...)` of the assistant
+  now has three tools (`AssistantApiIT` asserts them).
+- Live bug: the stub first sat under `/stub-carrier`; the unit test (standalone `MockMvc`) passed, the running app answered `400 Invalid
+  API version: 'quotes'` (path-segment versioning reads segment 1 of every path). Moved under `/api/{version}/`; the test is now
+  `@WebMvcTest`.
+- Live (`local`, port 8081, `provider=OLLAMA`, qwen3.5:4b; Ollama on CPU, 65-80 s per answer): quote, down (3 attempts), flaky (a
+  retry that worked), rate limited, too slow (6.4 s), refused, unknown SKU, name then delivery; the model passed each message on and
+  never invented an estimate. Not run: Anthropic.
+- Tests: `HttpCarrierQuoteClientTest` (9, incl. a real timeout against a JDK HTTP server), `ToolErrorProcessorTest` (9), `DeliveryToolsTest`
+  (4), `DeliveryServiceTest` (3), `StubCarrierControllerTest` (5), `DeliveryToolsIT` (6); `AssistantApiIT` (4) updated for the third tool and
+  the model-facing error text.
+- README: 11.3 section (layers, kinds and retries, what the model reads, stub table, live table, what went wrong first, pitfalls,
+  tests); 11.2's processor name and error note updated.
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (spring-ai-training: 197 unit/slice + 54 IT, 0
+  failures; spring-boot-training 75 + 66). The compose stack was restarted afterwards with the `ai` and `observability` profiles.

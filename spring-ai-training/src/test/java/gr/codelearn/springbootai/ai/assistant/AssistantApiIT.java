@@ -67,7 +67,7 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 		assertThat(model.prompts).hasSize(2);
 		final ToolCallingChatOptions options = (ToolCallingChatOptions) model.prompts.getFirst().getOptions();
 		assertThat(options.getToolCallbacks()).extracting(tool -> tool.getToolDefinition().name())
-											  .containsExactlyInAnyOrder("searchProducts", "getProduct");
+											  .containsExactlyInAnyOrder("searchProducts", "getProduct", "estimateDelivery");
 		assertThat(model.prompts.getLast().getInstructions()).extracting(Message::getMessageType).map(Enum::name)
 															 .containsExactly("SYSTEM", "USER", "ASSISTANT", "TOOL");
 	}
@@ -89,7 +89,8 @@ class AssistantApiIT extends AbstractOracleIntegrationTest {
 																		   {"name": "getProduct", "arguments": "{\\"input\\":{\\"sku\\":\\"blue laptop\\"}}"},
 																		   {"name": "getProduct", "arguments": "{\\"input\\":{\\"sku\\":\\"LAP-0002\\"}}", "error": null}]}""");
 		assertThat(response).bodyJson().extractingPath("$.toolCalls[0].error").asString()
-							.contains("sku: must be letters, a dash and digits, like LAP-0002");
+							.isEqualTo("Invalid arguments, the tool did not run: sku must be letters, a dash and digits, like LAP-0002. "
+							   + "Fix the arguments and call the tool again.");
 		assertThat(response).bodyJson().extractingPath("$.content").asString().startsWith("Tool said: {\"sku\":\"LAP-0002\"");
 
 		// The model saw the rejection as the tool's result, in words, and the catalog was not queried for "blue laptop".

@@ -54,3 +54,9 @@ app:
     # Unit 7.4: local development runs on the offline model (Ollama from compose.yaml, `--profile ai`). For the cloud model with the
     # same dev ergonomics, add the anthropic profile after this one: spring.profiles.active=local,anthropic (the last profile wins).
     chat-provider: ollama
+  delivery:
+    carrier:
+      stub:
+        # Unit 11.3: the application plays the carrier, and the postcode picks the behavior (see StubCarrierController): 50000 down,
+        # 50001 fails once then works, 50002 rate limited, 50003 too slow, 40404 refused, anything else a quote.
+        enabled: true

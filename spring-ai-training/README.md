@@ -1726,7 +1726,7 @@ to the model as the tool's result: `getProduct.input.sku: must be letters, a das
 but reads like a log line (a method path first, and with a stock constraint message it would be a regular expression), and
 several violations arrive in no set order.
 
-**What the model reads instead.** `ToolValidationExceptionProcessor` (a `ToolExecutionExceptionProcessor` bean, which makes
+**What the model reads instead.** `ToolErrorProcessor` (called `ToolValidationExceptionProcessor` in 11.2; a `ToolExecutionExceptionProcessor` bean, which makes
 Spring AI's auto-configuration back off) rewrites only that case, and passes every other failure to the default processor:
 
 ```
@@ -1734,7 +1734,7 @@ Invalid arguments, the tool did not run: sku must be letters, a dash and digits,
 ```
 
 It says that nothing ran, names each argument and why it is wrong (the constraint messages are written for a model, not for a
-log), and asks for a corrected call. `toolCalls[].error` in the response still shows the exception's own message.
+log), and asks for a corrected call. In 11.2 `toolCalls[].error` in the response still showed the exception's own message; since 11.3 it shows this text.
 
 **Live** (`qwen3.5:4b`, `local`, `provider=OLLAMA`):
 
@@ -1759,7 +1759,108 @@ The nested `input` object did not bother the small model: the three questions th
 **Tests.**
 - `CatalogToolsTest` (6): the input schema is nested, arguments still bind, bad SKU shapes, a blank and a missing SKU, and a
   negative price never reach `ProductService`; a valid call passes.
-- `ToolValidationExceptionProcessorTest` (3): the message for one violation, several violations in a stable order, another
+- `ToolErrorProcessorTest` (3 of its 9 tests, from 11.2; renamed in 11.3): the message for one violation, several violations in a stable order, another
   failure keeps the default message.
 - `AssistantApiIT` (4, one new): a scripted model sends `getProduct` with a product name; the recorded call has the error, the
   model's second round receives the rejection message, it calls again with a valid SKU and answers.
+
+### 11.3 Error handling
+
+**A tool that depends on something outside your control will fail, and the model reads the failure.** `estimateDelivery` asks an
+external carrier service how long delivery of a product to a postcode takes. The carrier can be down, slow, busy or unwilling. What
+the model is told in each case decides whether the customer hears the truth or a made-up delivery date.
+
+**Three layers, one policy.**
+
+| Layer | Job |
+|---|---|
+| `HttpCarrierQuoteClient` (a `RestClient` with connect and read timeouts) | classify every failure as an `ExternalServiceException` with a factual message and a `Kind`; retry only what is worth retrying |
+| `ToolErrorProcessor` (the one `ToolExecutionExceptionProcessor` bean) | turn the exception into the text the model reads: what failed, then what to do about that `Kind` |
+| the tool (`DeliveryTools`) | nothing: no try/catch, so failure handling is a policy in one place, not a habit of each tool |
+
+| Carrier answers | `Kind` | Client retries | The model is told |
+|---|---|---|---|
+| connection refused, timeout, `5xx` | `UNAVAILABLE` | yes, up to 2 more times (3 attempts, 200 ms apart) | "not responding (3 attempts). Do not retry and do not guess an answer. Tell the customer this is not available right now" |
+| `429` | `RATE_LIMITED` | no: asking again at once makes it worse | "busy. Do not retry now. Tell the customer to ask again in a few minutes" |
+| `404`, other `4xx`, an unreadable answer | `REJECTED` | no: same input, same answer | "does not deliver to postcode 40404. Retrying with the same input will not help. Tell the customer, and offer to try different input" |
+
+Retries use Spring Framework 7's own `RetryTemplate` (`org.springframework.core.retry`), not the Spring Retry library: no new
+dependency. Only reads are retried; a call that changed something would need an idempotency key first.
+
+**What the model reads for every kind of failure** (`ToolErrorProcessor`, looking through the causes Spring AI wraps the
+exception in):
+
+| Failure | Model reads |
+|---|---|
+| `ConstraintViolationException` (11.2) | the tool did not run, which arguments are wrong and why, call again |
+| `ExternalServiceException` | its factual message + the advice of its `Kind` |
+| arguments that are not JSON of the tool's shape (Jackson) | the tool did not run, send the schema's shape, call again (no Jackson text: it quotes the payload and class names) |
+| a `ModelReadableException` (unknown SKU) | its own message, as it is |
+| **anything else** | "The tool failed unexpectedly and gave no result. Do not guess one..." The exception is logged, never shown |
+
+The last row is the point of the unit. Spring AI's default sends the exception's own message to the model, so a `SQLException`
+would hand it `ORA-00942 ... jdbc:oracle:thin:@db.internal:1521/prod`. Now only exceptions that opt in with the
+`ModelReadableException` marker (their message is written to be read) reach the model verbatim; `ProductNotFoundException` opts in.
+
+**The response shows what the model was told.** `RecordingToolCallback` records `ToolErrorProcessor.describe(...)` instead of the
+exception's message, so `toolCalls[].error` is exactly the text the model received, and an unexpected exception's message reaches
+neither the model nor the API caller.
+
+**The stub carrier.** There is no real carrier, so with the `local` profile the application plays one
+(`StubCarrierController`, under `/api/v1/stub-carrier`, real HTTP on the application's own port): the client, its timeouts and its
+retries are the real ones. The postcode picks the behavior:
+
+| Postcode | Carrier does | Seen |
+|---|---|---|
+| 10431 (any other) | a quote (3 days, 4.90 EUR) | the answer |
+| 50000 | `503` always | 3 attempts, `UNAVAILABLE` |
+| 50001 | `503` once, then a quote | a retry that works: the customer never notices |
+| 50002 | `429` | `RATE_LIMITED`, no retry (22 ms) |
+| 50003 | no answer for 10 s | read timeout, 3 attempts: 6.4 s, `UNAVAILABLE` |
+| 40404 | `404` | `REJECTED`, no retry (13 ms) |
+
+**Live** (`qwen3.5:4b` on Ollama, `local`, port 8081, `provider=OLLAMA`). The model got the messages above and passed them on
+without inventing an estimate:
+
+| Question (English) | Tool result | Answer |
+|---|---|---|
+| delivery of LAP-0002 to 10431 | quote | "3 working days and costs 4.90" |
+| ... to 50000 | `UNAVAILABLE` after 3 attempts | "cannot be estimated right now ... try again later" |
+| ... to 50001 | a quote, after one failed attempt | "3 working days ... Stub Express" |
+| ... to 50002 | `RATE_LIMITED` | "the external carrier service is busy. Please try again later" |
+| ... to 50003 | `UNAVAILABLE` after 6.4 s | "the external carrier service is currently unavailable" |
+| ... to 40404 | `REJECTED` | "unavailable ... provide a valid five-digit postcode" (it offered different input) |
+| AUD-9999 to 10431 | "No product with SKU AUD-9999" | "not found in our catalog", the carrier was never asked |
+| the Flex 13 Convertible laptop to 10431 | `searchProducts`, then `estimateDelivery` LAP-0003 | "3 working days ... [LAP-0003]" |
+
+Each answer took 65-80 s in this run: Ollama was on the CPU after the compose stack restarted (11.1 measured 3.4 s on the GPU).
+
+**What went wrong first.** The stub sat under `/stub-carrier`, and its unit test (a standalone `MockMvc`) passed. The running
+application answered `400 Invalid API version: 'quotes'`: with path-segment versioning (segment 1) every path is read as
+`/{prefix}/{version}/...`, so `/stub-carrier/quotes` has the version "quotes". A live call found it in seconds; the fix was to put
+the stub under `/api/{version}/` like every controller, and to test it with `@WebMvcTest`, which loads the real MVC configuration.
+
+**Pitfalls.**
+
+| Pitfall | Here |
+|---|---|
+| Spring AI's default sends an exception's own message to the model: SQL, hostnames, stack detail | one `ToolExecutionExceptionProcessor`; only `ModelReadableException`s pass verbatim |
+| A model retries a failing tool as often as it likes | the message says not to; the client already retried; Spring AI caps a turn at 40 calls per tool |
+| A timeout is a failure too | connect 1 s and read 2 s (`app.delivery.carrier.*`); without them a hung carrier holds the tool loop |
+| A message saying only "error" makes the model guess | every message says what failed and what to tell the customer |
+| Retrying 4xx or 429 | `REJECTED` and `RATE_LIMITED` are never retried |
+| Network call inside a transaction | `DeliveryService` is not `@Transactional` |
+| A stub that only a unit test has seen | the stub is exercised over real HTTP, in the demo above |
+
+**Tests.**
+- `HttpCarrierQuoteClientTest` (9): the quote is read; a failure then success is one retry; down means 3 attempts then `UNAVAILABLE`
+  (no status code, body or host in the message; the cause keeps the detail); a connection failure; `429` and `404` are not retried;
+  an unreadable answer; zero retries says "1 attempt"; a real JDK HTTP server proves the read timeout cuts a hung carrier off.
+- `ToolErrorProcessorTest` (9): each kind of failure, the cause chain, Jackson, and that an unexpected exception's message
+  (`ORA-00942`, a JDBC URL) never appears.
+- `DeliveryToolsTest` (4), `DeliveryServiceTest` (3), `StubCarrierControllerTest` (5, `@WebMvcTest`).
+- `DeliveryToolsIT` (6): the real tools, validation, processor, recording and catalog over Oracle, with a scripted model and a failing
+  carrier: a quote; a carrier down (the model's second round gets the message, `error` equals it, no host from the cause); a refused
+  postcode; an unexpected `IllegalStateException` leaks neither to the model nor to the caller; an unknown product never asks the
+  carrier; a bad postcode is rejected before the carrier.
+- `AssistantApiIT` (4): the assistant now offers three tools; the recorded validation error is the model-facing text.

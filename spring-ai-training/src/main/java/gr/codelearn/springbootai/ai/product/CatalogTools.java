@@ -45,7 +45,7 @@ import java.util.List;
  * {@link ProductLookupInput}), and the class is {@link Validated}, so Spring's method validation proxy checks the arguments before the
  * method runs. Nothing else validates a model's arguments: Spring AI binds the JSON to the parameter types and calls the method, and a
  * model can send anything, valid JSON or not. A violation throws {@code ConstraintViolationException}, which {@code
- * ToolValidationExceptionProcessor} turns into a message the model can act on.
+ * ToolErrorProcessor} turns into a message the model can act on.
  *
  * <p>Both methods only read. A tool that changes something must be designed for being called when nobody asked (CLAUDE.md:
  * side-effect-aware tools).
