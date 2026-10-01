@@ -840,19 +840,34 @@ own module — no code here should be required for the Spring Boot units to buil
 - `CatalogResources`: `catalog://categories` and the template `catalog://product/{sku}` (JSON strings from the Boot `JsonMapper`).
 - `ProductEnrichmentTools.enrichProduct(sku)` (`McpSyncRequestContext` parameter): `info` log, `progress` 1/2 and 2/2, then `sample(...)` asks the
   client's model for a two-sentence description; the catalog text goes in as tagged data and the system prompt says to ignore instructions in it.
-  No sampling on the client -> a readable error; an unknown SKU fails before any sampling. Returns `EnrichedProduct`.
+  No sampling on the client -> a readable error (replaced by the follow-up below); an unknown SKU fails before any sampling. Returns `EnrichedProduct`.
 - Findings (2.0.1, pinned in tests): `@McpResource.title` does not reach `resources/list` (came back `null`); template resources appear under
   `resources/templates/list` only; an `@McpTool` failure's text is the message plus the root-cause message (the same line twice with no cause);
   Oracle returned `1299.00` as `1299`, so the sampling prompt formats the price with two decimals (caught by `EnrichProductIT`).
 - Tests: shared `support.SharedOracleContainer` + `AbstractCatalogIT` (one Oracle for the module, `@TestPropertySource` merges per subclass);
   `McpServerShowcaseIT` 10, **`ToolStyleIT` 10 (the same tests on the `tool` style: proof that behaviour is identical, only the hints differ)**,
   `McpResourcesIT` 6, `EnrichProductIT` 3 (the SDK client plays the model: sampling request content, progress token and values, log
-  notification, no-sampling error, unknown SKU asks no model), `CatalogServiceTest` 3.
+  notification, no-sampling error (since changed, see the follow-up), unknown SKU asks no model), `CatalogServiceTest` 3.
 - Live (compose Oracle, real `training` data, `curl`): `tools/list` shows 4 tools with the hints, `resources/list`, `resources/templates/list`,
   `resources/read` for `catalog://product/LAP-0004` and `catalog://categories`, `enrichProduct` from a client without sampling -> the readable
-  error. Not run: a real sampling round trip (curl cannot answer a sampling request) and Claude Code against the server; whether Claude Code
-  answers sampling requests is not verified.
+  error. Not run: a real sampling round trip (curl cannot answer a sampling request). Whether Claude Code answers
+  sampling requests was open here; the follow-up below records that it does not.
 - README: "12.2 MCP annotations" section (`@Tool` vs `@McpTool` table, resources, `enrichProduct`, tests); the tools table lists `enrichProduct`.
 - Verified: `./mvnw verify` -> `BUILD SUCCESS` (showcase: 3 unit + 29 IT, 0 failures). The first full run failed in `spring-ai-training` with
   `ORA-17800` (the known Testcontainers Oracle flake under load, 53 errors, nothing changed in that module); `-rf :spring-ai-training` passed
   (211 unit/slice + 69 IT; mcp-server-training 9 + 3).
+
+### 12.2 follow-up: enrichProduct without sampling (on request)
+
+- User ran `enrichProduct` from Claude Code: it reported that the client does not support MCP sampling and failed for every SKU. Decision:
+  do both follow-ups, record the finding and add a fallback.
+- `enrichProduct` no longer fails without sampling. It returns `EnrichedProduct` in one of two modes (unset fields left out of the JSON via
+  `@JsonInclude(NON_NULL)`): **sampled** (`enrichedDescription`, `generatedBy`) or **for the caller** (`instructions` = the system prompt plus the
+  tagged product text), so the calling model writes the description. The unknown-SKU error stays. Progress and log notifications only
+  happen in the sampled mode. The tool description tells the model which mode to expect.
+- Also fixed: the class Javadoc of `ProductEnrichmentTools` had lost its sentence in an earlier IDE reformat (it ended in "how").
+- Tests: `EnrichProductIT` no-sampling case now asserts the facts, the instructions (system prompt, tagged product, `1299.00 EUR`) and no
+  `enrichedDescription` / `generatedBy`; the sampled case asserts no `instructions`.
+- README: the enrichProduct section records that Claude Code does not offer sampling (verified by the user's run), the two modes table, and
+  the `@`-mention claim is marked as not verified.
+- Verified: `./mvnw -pl spring-ai-mcp-server-showcase verify` -> `BUILD SUCCESS` (3 unit + 29 IT). The rest of the reactor is unchanged.

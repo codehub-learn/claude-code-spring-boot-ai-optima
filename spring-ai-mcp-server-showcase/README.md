@@ -20,7 +20,7 @@ no code shared with `spring-ai-mcp-server-training`.
 | `listCategories` | none                                           | category names with product counts                         |
 | `searchProducts` | `query`, `category`, `maxPrice` (EUR), `limit` | `sku`, `name`, `category`, `price`, ordered by name        |
 | `getProduct`     | `sku` (required, case-insensitive)             | the above plus `description`                               |
-| `enrichProduct`  | `sku` (required)                               | catalog text and a new text from the client's model (12.2) |
+| `enrichProduct`  | `sku` (required)                               | the facts plus a new text from the client's model, or instructions for the caller's model (12.2) |
 
 Rules worth knowing:
 
@@ -118,7 +118,7 @@ resources/read  {"uri": "catalog://product/LAP-0004"}  ->  {"contents":[{"uri":"
 
 An unknown SKU makes `resources/read` fail with an error, not an empty result. Observed in 2.0.1: the `title` attribute of
 `@McpResource` does not reach `resources/list` (it came back `null`), so `name` and `description` carry the meaning. In Claude Code a
-resource is attached with an `@`-mention; support for resources differs between MCP clients, which is why the tools stay the primary
+resource is expected to be attached with an `@`-mention (not verified here); support for resources differs between MCP clients, which is why the tools stay the primary
 interface.
 
 ### enrichProduct: what only the MCP annotations can do
@@ -133,16 +133,25 @@ interface.
   only logs a warning.
 - **Logging**: `info("Enriching LAP-0004")`, shown in the client's own log view (the client sets the level with `logging/setLevel`).
 
-A client that does not offer sampling gets a readable error (`This client does not support sampling ... Use getProduct`), checked live
-with plain `curl`. A real sampling round trip needs a client with a model, so it is covered by `EnrichProductIT` (the SDK client plays the
-model) and was not run against Claude Code: whether Claude Code answers sampling requests is not verified here.
+**Claude Code does not offer sampling** (verified: calling `enrichProduct` from it reported that the client does not support MCP
+sampling). So without sampling the tool does not fail: it returns the catalog facts plus `instructions` (the system prompt and the
+tagged product text), and the calling model, Claude here, writes the description itself. The response has two modes, told apart by which
+fields are present (unset ones are left out of the JSON):
+
+| Mode | When | Fields |
+|---|---|---|
+| Sampled | the client declared sampling | `sku`, `name`, `catalogDescription`, `enrichedDescription`, `generatedBy` |
+| For the caller | no sampling (Claude Code) | `sku`, `name`, `catalogDescription`, `instructions` |
+
+The sampling round trip itself is covered by `EnrichProductIT` (the SDK client plays the model); it has not run against a real client
+with a model. Progress and log notifications only happen in the sampled mode.
 
 ### Tests (12.2)
 
 - `McpServerShowcaseIT` (10) and `ToolStyleIT` (10, the same tests on the `tool` style): four tools, only `sku` required, hints present
   in one style and absent in the other, search / get / categories / error paths.
 - `McpResourcesIT` (6): list, template list, read both, case-insensitive SKU, unknown and demo SKU fail.
-- `EnrichProductIT` (3): sampling request content, progress and log notifications, no-sampling error, unknown SKU asks no model.
+- `EnrichProductIT` (3): sampling request content, progress and log notifications; no sampling returns the facts and instructions; unknown SKU asks no model.
 
 ## Check the server without a client
 

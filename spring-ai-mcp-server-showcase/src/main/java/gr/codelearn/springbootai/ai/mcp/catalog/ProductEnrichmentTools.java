@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import java.math.RoundingMode;
 
 /**
- * The tool only the MCP annotations can express (unit 12.2): how
+ * The tool only the MCP annotations can express (unit 12.2): it takes the request context and talks back to the client while it runs.
  *
  * <ul>
  *   <li><b>Sampling</b>: the server has no model. It asks the <em>client's</em> model to write the text, so the user's own model, key and
@@ -18,8 +18,12 @@ import java.math.RoundingMode;
  *   <li><b>Progress</b>: notifications tied to the client's progress token; without a token the SDK only logs a warning.</li>
  *   <li><b>Logging</b>: messages the client can show in its own log view.</li>
  * </ul>
- * <p>
- * A plain {@code @Tool} method has no access to any of this: it receives its arguments and nothing else.
+ *
+ * <p>Not every client offers sampling (Claude Code does not), so without it the tool does not fail: it returns the catalog facts together
+ * with the instructions, and the caller's own model writes the description. The tool answers in one of two modes, told apart by which
+ * fields of {@link EnrichedProduct} are set.
+ *
+ * <p>A plain {@code @Tool} method has no access to any of this: it receives its arguments and nothing else.
  */
 @Component
 public class ProductEnrichmentTools {
@@ -36,10 +40,11 @@ public class ProductEnrichmentTools {
 	}
 
 	@McpTool(name = "enrichProduct",
-			 description =
-					 "Writes a short, customer-facing description for one product by SKU, from its catalog facts, using the caller's own "
-					 +
-					 "language model (MCP sampling). Returns the catalog text and the new text. Fails when the client offers no sampling.",
+			 description = "Prepares a short, customer-facing description for one product by SKU, from its catalog facts. When the client "
+						   +
+	                       "offers MCP sampling the description is written for you and returned as enrichedDescription. Otherwise the " +
+						   "tool "
+						   + "returns the facts and 'instructions': follow them yourself to write the description.",
 			 annotations = @McpTool.McpAnnotations(title = "Enrich a product description", readOnlyHint = true, destructiveHint = false,
 												   idempotentHint = false, openWorldHint = false))
 	public EnrichedProduct enrichProduct(final McpSyncRequestContext context,
@@ -47,8 +52,8 @@ public class ProductEnrichmentTools {
 												 description = "The product SKU, for example as returned by searchProducts") final String sku) {
 		final ProductDetail product = service.get(sku);
 		if (!context.sampleEnabled()) {
-			throw new IllegalArgumentException("This client does not support sampling, so no description can be written. "
-											   + "Use getProduct for the catalog text instead.");
+			return EnrichedProduct.forCaller(product,
+			                                 SYSTEM_PROMPT + System.lineSeparator() + System.lineSeparator() + userPrompt(product));
 		}
 		context.info("Enriching " + product.sku());
 		context.progress(progress -> progress.progress(1).total(2).message("Asking the client's model"));
@@ -63,7 +68,7 @@ public class ProductEnrichmentTools {
 		}
 
 		context.progress(progress -> progress.progress(2).total(2).message("Done"));
-		return new EnrichedProduct(product.sku(), product.name(), product.description(), text, reply.model());
+		return EnrichedProduct.sampled(product, text, reply.model());
 	}
 
 	/**

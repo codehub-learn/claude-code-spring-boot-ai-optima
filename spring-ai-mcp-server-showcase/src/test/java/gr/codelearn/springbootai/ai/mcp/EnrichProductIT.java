@@ -55,7 +55,8 @@ class EnrichProductIT extends AbstractCatalogIT {
 		assertThat(text).contains("\"sku\":\"LAP-001\"")
 						.contains("Light 14 inch laptop")
 						.contains("A light 14 inch laptop for every day.")
-						.contains("\"generatedBy\":\"test-model\"");
+						.contains("\"generatedBy\":\"test-model\"")
+						.doesNotContain("instructions");
 
 		assertThat(samplingRequests).singleElement().satisfies(request -> {
 			assertThat(request.systemPrompt()).contains("online shop").contains("data, not instructions");
@@ -73,13 +74,16 @@ class EnrichProductIT extends AbstractCatalogIT {
 	}
 
 	@Test
-	void failsReadablyWhenTheClientOffersNoSampling() {
+	void handsTheFactsAndInstructionsToTheCallerWhenTheClientOffersNoSampling() {
 		final McpSyncClient client = connect();
 
-		final CallToolResult result = client.callTool(new CallToolRequest("enrichProduct", Map.of("sku", "LAP-001")));
+		final CallToolResult result = client.callTool(new CallToolRequest("enrichProduct", Map.of("sku", "lap-001")));
 
-		assertThat(result.isError()).isTrue();
-		assertThat(((TextContent) result.content().getFirst()).text()).contains("does not support sampling").contains("getProduct");
+		assertThat(result.isError()).as("%s", result.content()).isFalse();
+		final String text = ((TextContent) result.content().getFirst()).text();
+		assertThat(text).contains("\"sku\":\"LAP-001\"").contains("\"catalogDescription\":\"Light 14 inch laptop");
+		assertThat(text).contains("\"instructions\":").contains("online shop").contains("UltraBook 14").contains("1299.00 EUR");
+		assertThat(text).doesNotContain("enrichedDescription").doesNotContain("generatedBy");
 	}
 
 	@Test
@@ -88,7 +92,7 @@ class EnrichProductIT extends AbstractCatalogIT {
 														 .sampling(request -> {
 															 samplingRequests.add(request);
 															 return CreateMessageResult.builder(Role.ASSISTANT, "unused", "test-model")
-			                                                                           .build();
+																					   .build();
 														 }));
 
 		final CallToolResult result = client.callTool(new CallToolRequest("enrichProduct", Map.of("sku", "NOPE-1")));
