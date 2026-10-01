@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: spring-ai-mcp-server-showcase
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    # The compose Oracle spring-boot-training uses, as spring-ai-training's own user ai_training (created by compose/oracle-startdb, which
+    # also grants it READ on the training catalog tables, and nothing more there). A throwaway local credential, like compose.yaml's;
+    # prod overrides with SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD. The app assumes the database is up.
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: ai_training
+    password: ai_training
+    hikari:
+      # A handful of read-only lookups; no need for the default ten connections.
+      maximum-pool-size: 5
+  ai:
+    mcp:
+      server:
+        name: catalog-showcase
+        version: "@project.version@"
+        # A synchronous server (the tools are plain blocking queries) speaking streamable HTTP, the current MCP HTTP transport.
+        type: SYNC
+        protocol: STREAMABLE
+        instructions: >-
+          Read-only access to the Code.Learn product catalog. Start with listCategories to learn the category names, use searchProducts
+          to find products by text, category or maximum price, and getProduct for one product's full description. Prices are in EUR.
+        streamable-http:
+          mcp-endpoint: /mcp
+        annotation-scanner:
+          # The tools are Spring AI @Tool methods (CatalogToolsConfig). This turns off the scan for the MCP SDK's own @McpTool
+          # annotations, which would only log "No tool methods found" at startup.
+          enabled: false
+
+server:
+  # Not 8080 (spring-ai-training) or 8090 (spring-ai-mcp-server-training): all three can run side by side.
+  port: 8091
+
+# Application-owned settings, bound to a validated record (catalog.CatalogProperties).
+app:
+  catalog:
+    # The schema holding spring-boot-training's product and category tables.
+    schema: training
+    # Products per search when the caller names no limit, and the most one search may return.
+    default-limit: 10
+    max-limit: 20
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  structured:
+    format:
+      # Native Boot structured logging (ECS JSON); application-local.yml switches it off for readable local runs.
+      console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+        version: "@project.version@"
+        environment: ${spring.profiles.active:default}

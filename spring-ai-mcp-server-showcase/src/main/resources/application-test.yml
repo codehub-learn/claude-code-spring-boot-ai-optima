@@ -1,0 +1,15 @@
+# Test profile (@ActiveProfiles("test")).
+spring:
+  main:
+    banner-mode: off
+  devtools:
+    restart:
+      enabled: false
+
+logging:
+  structured:
+    format:
+      console:
+  level:
+    root: WARN
+    gr.codelearn.springbootai.ai.mcp: INFO

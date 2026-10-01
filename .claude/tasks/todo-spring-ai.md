@@ -116,7 +116,7 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U12 — Showcase: Create an MCP Server (4h)
 
-- [ ] **12.1 MCP server** — scaffold `spring-ai-mcp-server-showcase` (own module, HTTP transport),
+- [x] **12 MCP server** — scaffold `spring-ai-mcp-server-showcase` (own module, HTTP transport),
   exposing real tools per the *Open questions* (U12 tool content), and connect it to Claude Code (per the *Open questions* — Claude Code
   wiring) for a live demo.
 
@@ -792,3 +792,32 @@ own module — no code here should be required for the Spring Boot units to buil
 - `WikipediaTools.searchWikipedia(query)`: best 3 articles (rank order, intro cut at 500 chars, link); no match is an answer, a failure is one plain sentence (MCP error result). `WikipediaProperties` (`app.wikipedia.*`, timeouts 2 s / 5 s), a `wikipediaClient` `RestClient` with a User-Agent, published in `ToolsConfig`. Deviation from the 11.4 text ("one or two toy tools"): a third tool, at the user's request.
 - Tests: `WikipediaToolsTest` (5, `MockRestServiceServer`), `McpServerIT` now expects three tools. Server module `verify`: 9 unit + 3 IT, 0 failures. The full reactor was not rerun (the client module is unchanged).
 - Live (Ollama, real Wikipedia): two `searchWikipedia` calls over MCP (989 ms, 379 ms), answer Rod Johnson / 2003, plus an unverified extra paragraph. Not run: Anthropic; the User-Agent header is only exercised live.
+
+### 12 MCP server (done)
+
+- User decisions: tool content = **read-only catalog lookup** (open question settled); Claude Code wiring = **docs only** (README carries the
+  `.mcp.json` snippet and `claude mcp add --transport http` command, no second project); datasource = the existing `ai_training` user; port
+  8091. Plan in `.claude/tasks/plan-12.md`.
+- Module `spring-ai-mcp-server-showcase` (`gr.codelearn.springbootai.ai.mcp`), registered in the parent: `spring-ai-starter-mcp-server-webmvc`
+  (SYNC, STREAMABLE, `/mcp`), `spring-boot-starter-jdbc`, `ojdbc17`, validation, actuator. No JPA, no Flyway (the schema is not ours), no model.
+  Built fresh, nothing copied from the sibling modules except the module scaffolding shape.
+- `catalog` feature: `CatalogTools` (`searchProducts(query, category, maxPrice, limit)`, `getProduct(sku)`, `listCategories()`), package-private
+  `CatalogService` (JdbcClient, bind variables only, `GEN-*` excluded, `like ... escape` so `%` / `_` / `\` match themselves, limit clamped),
+  `CatalogProperties` (`app.catalog.{schema,default-limit,max-limit}`, validated, schema restricted to a plain identifier because it is
+  written into the SQL), result records, `CatalogToolsConfig` (`ToolCallbackProvider`). A failure (unknown / blank SKU, negative `maxPrice`) is
+  an `IllegalArgumentException`, which the server returns as an `isError` result with a readable message.
+- Bug caught by the IT: a `"...%s...".formatted(...)` after a `+` applied to the second literal only, so the search SQL kept a literal `%s` and
+  every filtered search failed with `isError`. Fixed by formatting the first literal; the IT's helper now prints the error text in its
+  assertion message.
+- Tests: `CatalogServiceTest` (3), `McpServerShowcaseIT` (8: tools list, categories with counts, search by text / category / price / limit,
+  wildcards literal, get by SKU ignoring case, unknown SKU and `GEN-*` SKU as error results, negative price). The IT starts its own
+  Testcontainers Oracle and builds the catalog tables in the container user's schema through `spring.sql.init` scripts under
+  `src/test/resources/sql`, so it needs neither compose nor spring-boot-training.
+- Live (compose Oracle, real `training` data, 524 rows visible to `ai_training`): `curl` over MCP: `initialize` (server `catalog-showcase`),
+  `tools/list` (3 tools with schemas), `listCategories` (6 categories x 4 products, no `GEN-*`), `searchProducts` (laptop, max 2000, limit 3 ->
+  LAP-0004), `getProduct NOPE` -> `isError: true` with the message. Prices lose trailing zeros in JSON (`1749`). Not run: a real Claude Code
+  session against it (README steps are for the user), and no Anthropic call.
+- README: new `spring-ai-mcp-server-showcase/README.md` (tools, rules, run, Claude Code connection, demo prompts, curl check, tests, pitfalls).
+  The unauthenticated HTTP endpoint is noted as localhost-only.
+- Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (showcase: 3 unit + 8 IT, 0 failures; the other
+  modules unchanged and green).

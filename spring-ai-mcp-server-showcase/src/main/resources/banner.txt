@@ -1,0 +1,8 @@
+${AnsiColor.BRIGHT_GREEN}
+ __  __  ____ ____    ____  _
+|  \/  |/ ___|  _ \  / ___|| |__   _____      _____ __ _ ___  ___
+| |\/| | |   | |_) | \___ \| '_ \ / _ \ \ /\ / / __/ _` / __|/ _ \
+| |  | | |___|  __/   ___) | | | | (_) \ V  V / (_| (_| \__ \  __/
+|_|  |_|\____|_|     |____/|_| |_|\___/ \_/\_/ \___\__,_|___/\___|
+${AnsiColor.CYAN} :: Code.Learn :: Spring AI MCP server (catalog showcase)
+${AnsiColor.DEFAULT} :: Spring Boot${spring-boot.formatted-version} :: app version @project.version@ ::

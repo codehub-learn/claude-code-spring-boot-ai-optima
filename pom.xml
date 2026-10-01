@@ -31,6 +31,7 @@
 		<module>spring-boot-training</module>
 		<module>spring-ai-training</module>
 		<module>spring-ai-mcp-server-training</module>
+		<module>spring-ai-mcp-server-showcase</module>
 	</modules>
 
 	<!-- Properties/Variables -->
