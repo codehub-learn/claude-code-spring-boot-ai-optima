@@ -116,9 +116,13 @@ own module — no code here should be required for the Spring Boot units to buil
 
 ## U12 — Showcase: Create an MCP Server (4h)
 
-- [x] **12 MCP server** — scaffold `spring-ai-mcp-server-showcase` (own module, HTTP transport),
+- [x] **12.1 MCP server** — scaffold `spring-ai-mcp-server-showcase` (own module, HTTP transport),
   exposing real tools per the *Open questions* (U12 tool content), and connect it to Claude Code (per the *Open questions* — Claude Code
   wiring) for a live demo.
+- [ ] **12.2 MCP annotations** — extend `spring-ai-mcp-server-showcase` (same module, beside the 12.1 `@Tool` tools) with the MCP-native
+  annotations: the catalog tools re-expressed with `@McpTool` + `@McpToolParam` to contrast the two styles, `@McpResource` for the category
+  list and a templated product by SKU (`catalog://product/{sku}`), and one MCP-only feature a plain `@Tool` cannot do (server exchange, e.g.
+  a progress notification or client logging). IT coverage for `resources/list` / `resources/read`, plus a README section.
 
 ## Definition of done (per topic and overall)
 
@@ -793,7 +797,7 @@ own module — no code here should be required for the Spring Boot units to buil
 - Tests: `WikipediaToolsTest` (5, `MockRestServiceServer`), `McpServerIT` now expects three tools. Server module `verify`: 9 unit + 3 IT, 0 failures. The full reactor was not rerun (the client module is unchanged).
 - Live (Ollama, real Wikipedia): two `searchWikipedia` calls over MCP (989 ms, 379 ms), answer Rod Johnson / 2003, plus an unverified extra paragraph. Not run: Anthropic; the User-Agent header is only exercised live.
 
-### 12 MCP server (done)
+### 12.1 MCP server (done)
 
 - User decisions: tool content = **read-only catalog lookup** (open question settled); Claude Code wiring = **docs only** (README carries the
   `.mcp.json` snippet and `claude mcp add --transport http` command, no second project); datasource = the existing `ai_training` user; port
