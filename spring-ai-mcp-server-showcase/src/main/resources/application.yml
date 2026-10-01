@@ -24,13 +24,15 @@ spring:
         protocol: STREAMABLE
         instructions: >-
           Read-only access to the Code.Learn product catalog. Start with listCategories to learn the category names, use searchProducts
-          to find products by text, category or maximum price, and getProduct for one product's full description. Prices are in EUR.
+          to find products by text, category or maximum price, and getProduct for one product's full description. enrichProduct writes a
+          customer-facing description with the caller's own model. The catalog is also readable as resources: catalog://categories and
+          catalog://product/{sku}. Prices are in EUR.
         streamable-http:
           mcp-endpoint: /mcp
         annotation-scanner:
-          # The tools are Spring AI @Tool methods (CatalogToolsConfig). This turns off the scan for the MCP SDK's own @McpTool
-          # annotations, which would only log "No tool methods found" at startup.
-          enabled: false
+          # Unit 12.2: on, so the MCP-native @McpTool / @McpResource methods are found (12.1 had it off, the tools were @Tool methods
+          # published through CatalogToolsConfig, and the scan only logged "No tool methods found").
+          enabled: true
 
 server:
   # Not 8080 (spring-ai-training) or 8090 (spring-ai-mcp-server-training): all three can run side by side.
@@ -44,6 +46,9 @@ app:
     # Products per search when the caller names no limit, and the most one search may return.
     default-limit: 10
     max-limit: 20
+    # Which annotation publishes the three catalog tools: mcp (@McpTool, unit 12.2) or tool (Spring AI @Tool, unit 12.1). One at a time,
+    # because two tools with the same name would clash. enrichProduct and the resources are MCP-native in both.
+    tool-style: mcp
 
 management:
   endpoints:

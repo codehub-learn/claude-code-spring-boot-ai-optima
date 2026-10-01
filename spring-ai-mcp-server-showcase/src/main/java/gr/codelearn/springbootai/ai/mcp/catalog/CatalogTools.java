@@ -3,17 +3,20 @@ package gr.codelearn.springbootai.ai.mcp.catalog;
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * The three tools Claude Code sees: search, look up, and list categories. Read-only by construction, since the service only runs
- * {@code select}. A failure (an unknown SKU, a blank argument) is thrown as {@link IllegalArgumentException}; the MCP server returns its
- * message to the client as an error result the model can read and act on, not as a protocol failure.
+ * The three catalog tools in Spring AI's {@code @Tool} style (12.1), published when {@code app.catalog.tool-style=tool};
+ * {@link McpCatalogTools} is the same three in the MCP-native style. Read-only by construction, since the service only runs {@code select}.
+ * A failure (an unknown SKU, a blank argument) is thrown as {@link IllegalArgumentException}; the MCP server returns its message to the
+ * client as an error result the model can read and act on, not as a protocol failure.
  */
 @Component
+@ConditionalOnProperty(prefix = "app.catalog", name = "tool-style", havingValue = "tool")
 public class CatalogTools {
 
 	private final CatalogService service;
@@ -33,9 +36,6 @@ public class CatalogTools {
 			@ToolParam(description = "Highest price in EUR, inclusive", required = false) final @Nullable BigDecimal maxPrice,
 			@ToolParam(description = "How many products to return at most; a default applies when omitted and a maximum is enforced",
 					   required = false) final @Nullable Integer limit) {
-		if (maxPrice != null && maxPrice.signum() < 0) {
-			throw new IllegalArgumentException("maxPrice must not be negative, got " + maxPrice.toPlainString() + ".");
-		}
 		return service.search(query, category, maxPrice, limit);
 	}
 
@@ -43,12 +43,7 @@ public class CatalogTools {
 						+ "Find SKUs with searchProducts.")
 	public ProductDetail getProduct(
 			@ToolParam(description = "The product SKU, for example as returned by searchProducts") final String sku) {
-		if (sku == null || sku.isBlank()) {
-			throw new IllegalArgumentException("sku must not be blank. Find SKUs with searchProducts.");
-		}
-		return service.find(sku)
-					  .orElseThrow(() -> new IllegalArgumentException(
-							  "No product with SKU '" + sku.strip() + "'. Find SKUs with searchProducts."));
+		return service.get(sku);
 	}
 
 	@Tool(description = "Lists every product category with the number of products in it. Use it to learn the valid category names for " +

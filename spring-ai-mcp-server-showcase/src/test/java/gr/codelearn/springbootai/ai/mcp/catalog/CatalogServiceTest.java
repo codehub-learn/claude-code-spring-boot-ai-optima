@@ -8,7 +8,8 @@ import static org.mockito.Mockito.mock;
 
 class CatalogServiceTest {
 
-	private final CatalogService service = new CatalogService(mock(JdbcClient.class), new CatalogProperties("training", 10, 20));
+	private final CatalogService service = new CatalogService(mock(JdbcClient.class),
+	                                                          new CatalogProperties("training", 10, 20, CatalogProperties.ToolStyle.MCP));
 
 	@Test
 	void likePatternMakesWildcardsLiteralAndLowercases() {

@@ -32,6 +32,9 @@ class CatalogService {
 
 	List<ProductSummary> search(final @Nullable String query, final @Nullable String category, final @Nullable BigDecimal maxPrice,
 								final @Nullable Integer limit) {
+		if (maxPrice != null && maxPrice.signum() < 0) {
+			throw new IllegalArgumentException("maxPrice must not be negative, got " + maxPrice.toPlainString() + ".");
+		}
 		final var sql = new StringBuilder("select p.sku, p.name, c.name as category, p.price from %s.product p join %s.category c "
 												  .formatted(properties.schema(), properties.schema()))
 				.append("on c.id = p.category_id where ")
@@ -56,6 +59,18 @@ class CatalogService {
 						 .query((rs, rowNum) -> new ProductSummary(rs.getString("sku"), rs.getString("name"), rs.getString("category"),
 																   rs.getBigDecimal("price")))
 						 .list();
+	}
+
+	/**
+	 * One product by SKU for a tool or resource: a blank or unknown SKU is an {@link IllegalArgumentException} whose message tells the
+	 * caller (a model) what to do next.
+	 */
+	ProductDetail get(final @Nullable String sku) {
+		if (sku == null || sku.isBlank()) {
+			throw new IllegalArgumentException("sku must not be blank. Find SKUs with searchProducts.");
+		}
+		return find(sku).orElseThrow(() -> new IllegalArgumentException("No product with SKU '" + sku.strip()
+																		+ "'. Find SKUs with searchProducts."));
 	}
 
 	Optional<ProductDetail> find(final String sku) {

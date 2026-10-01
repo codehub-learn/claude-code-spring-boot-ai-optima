@@ -119,7 +119,7 @@ own module — no code here should be required for the Spring Boot units to buil
 - [x] **12.1 MCP server** — scaffold `spring-ai-mcp-server-showcase` (own module, HTTP transport),
   exposing real tools per the *Open questions* (U12 tool content), and connect it to Claude Code (per the *Open questions* — Claude Code
   wiring) for a live demo.
-- [ ] **12.2 MCP annotations** — extend `spring-ai-mcp-server-showcase` (same module, beside the 12.1 `@Tool` tools) with the MCP-native
+- [x] **12.2 MCP annotations** — extend `spring-ai-mcp-server-showcase` (same module, beside the 12.1 `@Tool` tools) with the MCP-native
   annotations: the catalog tools re-expressed with `@McpTool` + `@McpToolParam` to contrast the two styles, `@McpResource` for the category
   list and a templated product by SKU (`catalog://product/{sku}`), and one MCP-only feature a plain `@Tool` cannot do (server exchange, e.g.
   a progress notification or client logging). IT coverage for `resources/list` / `resources/read`, plus a README section.
@@ -825,3 +825,34 @@ own module — no code here should be required for the Spring Boot units to buil
   The unauthenticated HTTP endpoint is noted as localhost-only.
 - Verified: full-reactor `./mvnw verify` with the compose stack stopped -> `BUILD SUCCESS` (showcase: 3 unit + 8 IT, 0 failures; the other
   modules unchanged and green).
+
+### 12.2 MCP annotations (done)
+
+- User decisions: same module beside the 12.1 tools; default style `mcp` (not `tool`); the MCP-only demo is **enrichment** (read as: a tool that
+  enriches a product with text from the client's model, so sampling plus progress plus logging in one tool). Plan in `.claude/tasks/plan-12.2.md`.
+- Facts checked in the 2.0.1 jars first: the annotations are `org.springframework.ai.mcp.annotation` (the `org.springaicommunity` 0.8.0 jar in
+  `~/.m2` is an older line); `@McpToolParam.required` defaults to **true** (opposite of `@ToolParam`); discovery needs
+  `spring.ai.mcp.server.annotation-scanner.enabled`, which 12.1 had off, so it is on now.
+- `app.catalog.tool-style` (`mcp` default | `tool`, validated enum in `CatalogProperties`) picks which class publishes the three catalog tools,
+  because two tools with one name would clash. `McpCatalogTools` (`@McpTool` + `@McpToolParam`, with `@McpAnnotations` hints: title, read-only,
+  non-destructive, idempotent, closed-world) vs `CatalogTools` + `CatalogToolsConfig` (`@Tool`, now `@ConditionalOnProperty`). Validation moved
+  into `CatalogService` (`search` rejects a negative price, new `get(sku)`), so both styles are thin and identical.
+- `CatalogResources`: `catalog://categories` and the template `catalog://product/{sku}` (JSON strings from the Boot `JsonMapper`).
+- `ProductEnrichmentTools.enrichProduct(sku)` (`McpSyncRequestContext` parameter): `info` log, `progress` 1/2 and 2/2, then `sample(...)` asks the
+  client's model for a two-sentence description; the catalog text goes in as tagged data and the system prompt says to ignore instructions in it.
+  No sampling on the client -> a readable error; an unknown SKU fails before any sampling. Returns `EnrichedProduct`.
+- Findings (2.0.1, pinned in tests): `@McpResource.title` does not reach `resources/list` (came back `null`); template resources appear under
+  `resources/templates/list` only; an `@McpTool` failure's text is the message plus the root-cause message (the same line twice with no cause);
+  Oracle returned `1299.00` as `1299`, so the sampling prompt formats the price with two decimals (caught by `EnrichProductIT`).
+- Tests: shared `support.SharedOracleContainer` + `AbstractCatalogIT` (one Oracle for the module, `@TestPropertySource` merges per subclass);
+  `McpServerShowcaseIT` 10, **`ToolStyleIT` 10 (the same tests on the `tool` style: proof that behaviour is identical, only the hints differ)**,
+  `McpResourcesIT` 6, `EnrichProductIT` 3 (the SDK client plays the model: sampling request content, progress token and values, log
+  notification, no-sampling error, unknown SKU asks no model), `CatalogServiceTest` 3.
+- Live (compose Oracle, real `training` data, `curl`): `tools/list` shows 4 tools with the hints, `resources/list`, `resources/templates/list`,
+  `resources/read` for `catalog://product/LAP-0004` and `catalog://categories`, `enrichProduct` from a client without sampling -> the readable
+  error. Not run: a real sampling round trip (curl cannot answer a sampling request) and Claude Code against the server; whether Claude Code
+  answers sampling requests is not verified.
+- README: "12.2 MCP annotations" section (`@Tool` vs `@McpTool` table, resources, `enrichProduct`, tests); the tools table lists `enrichProduct`.
+- Verified: `./mvnw verify` -> `BUILD SUCCESS` (showcase: 3 unit + 29 IT, 0 failures). The first full run failed in `spring-ai-training` with
+  `ORA-17800` (the known Testcontainers Oracle flake under load, 53 errors, nothing changed in that module); `-rf :spring-ai-training` passed
+  (211 unit/slice + 69 IT; mcp-server-training 9 + 3).

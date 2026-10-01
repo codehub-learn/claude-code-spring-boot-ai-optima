@@ -1,6 +1,8 @@
 # spring-ai-mcp-server-showcase
 
-Unit 12: a standalone MCP server that publishes a read-only view of the product catalog (the `training` schema of
+## 12.1 MCP Server
+
+A standalone MCP server that publishes a read-only view of the product catalog (the `training` schema of
 spring-boot-training) so Claude Code can search it in plain language. No model lives here: the client brings its own. Built fresh,
 no code shared with `spring-ai-mcp-server-training`.
 
@@ -13,11 +15,12 @@ no code shared with `spring-ai-mcp-server-training`.
 
 ## Tools
 
-| Tool             | Arguments (all optional unless noted)          | Returns                                             |
-|------------------|------------------------------------------------|-----------------------------------------------------|
-| `listCategories` | none                                           | category names with product counts                  |
-| `searchProducts` | `query`, `category`, `maxPrice` (EUR), `limit` | `sku`, `name`, `category`, `price`, ordered by name |
-| `getProduct`     | `sku` (required, case-insensitive)             | the above plus `description`                        |
+| Tool             | Arguments (all optional unless noted)          | Returns                                                    |
+|------------------|------------------------------------------------|------------------------------------------------------------|
+| `listCategories` | none                                           | category names with product counts                         |
+| `searchProducts` | `query`, `category`, `maxPrice` (EUR), `limit` | `sku`, `name`, `category`, `price`, ordered by name        |
+| `getProduct`     | `sku` (required, case-insensitive)             | the above plus `description`                               |
+| `enrichProduct`  | `sku` (required)                               | catalog text and a new text from the client's model (12.2) |
 
 Rules worth knowing:
 
@@ -70,6 +73,76 @@ Demo prompts:
 - "Find laptops under 2000 EUR and tell me which is the cheapest."
 - "Give me the full description of LAP-0004."
 - "Is there a product with SKU NOPE-1?" (shows the error result being read and explained)
+
+## 12.2 MCP annotations: @McpTool, @McpToolParam, @McpResource
+
+12.1 published the tools with Spring AI's `@Tool`. 12.2 adds the MCP-native annotations (`org.springframework.ai.mcp.annotation`, found by
+the annotation scanner, `spring.ai.mcp.server.annotation-scanner.enabled: true`).
+
+### @Tool or @McpTool
+
+`app.catalog.tool-style` picks which one publishes the three catalog tools (`mcp` is the default, `tool` is the 12.1 style). Only one runs:
+two tools with the same name in one server would clash. A client sees the same names, descriptions and arguments either way, and
+`ToolStyleIT` runs the whole tool test class against the `tool` style to prove it.
+
+|                                                                                           | `@Tool` / `@ToolParam` (12.1)                              | `@McpTool` / `@McpToolParam` (12.2)                                   |
+|-------------------------------------------------------------------------------------------|------------------------------------------------------------|-----------------------------------------------------------------------|
+| Package                                                                                   | `org.springframework.ai.tool.annotation`                   | `org.springframework.ai.mcp.annotation`                               |
+| Works outside MCP                                                                         | yes: the same class can be offered to a local `ChatClient` | no, MCP only                                                          |
+| Published by                                                                              | a `ToolCallbackProvider` bean (`CatalogToolsConfig`)       | the annotation scanner, no bean needed                                |
+| MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`, `title`) | not expressible                                            | `annotations = @McpTool.McpAnnotations(...)`                          |
+| Optional argument                                                                         | `@ToolParam(required = false)`, default `true`             | `@McpToolParam(required = false)`, default `true`                     |
+| Server context (progress, logging, sampling)                                              | not available                                              | a `McpSyncRequestContext` parameter, not part of the schema           |
+| Failure                                                                                   | exception message goes back as an error result             | the same, but the text is `message` + line break + root cause message |
+
+Why the hints matter: they are metadata a client may use, for example to treat a `readOnlyHint: true` tool as safe to run without a
+prompt. Which clients act on them, and how, is up to the client; Claude Code's behaviour was not checked here. All three catalog tools
+declare themselves read-only, idempotent and closed-world.
+
+A note on the last row: with no cause, the error text repeats the message twice (`...\r\n...`, seen live). Harmless to a model, ugly in a
+log.
+
+### Resources
+
+A tool is something the model decides to call, with arguments. A resource is content addressed by a URI that the application or the user
+attaches to the conversation. `CatalogResources` serves the same data both ways:
+
+| URI                       | Listed under               | Content                                                     |
+|---------------------------|----------------------------|-------------------------------------------------------------|
+| `catalog://categories`    | `resources/list`           | the categories with counts, JSON                            |
+| `catalog://product/{sku}` | `resources/templates/list` | one product, JSON; the `{sku}` becomes the method parameter |
+
+```
+resources/read  {"uri": "catalog://product/LAP-0004"}  ->  {"contents":[{"uri":"...","mimeType":"application/json","text":"{...}"}]}
+```
+
+An unknown SKU makes `resources/read` fail with an error, not an empty result. Observed in 2.0.1: the `title` attribute of
+`@McpResource` does not reach `resources/list` (it came back `null`), so `name` and `description` carry the meaning. In Claude Code a
+resource is attached with an `@`-mention; support for resources differs between MCP clients, which is why the tools stay the primary
+interface.
+
+### enrichProduct: what only the MCP annotations can do
+
+`enrichProduct(sku)` takes a `McpSyncRequestContext` and talks back to the client while it runs:
+
+- **Sampling**: the server has no model. It asks the client's own model to write a short customer-facing description from the catalog facts
+  (`context.sample(...)`), so the user's model, key and consent flow are used and no provider code lives here. The catalog text is wrapped
+  as data in the prompt and the system prompt says to ignore instructions inside it.
+- **Progress**: `progress(1/2)` before and `progress(2/2)` after the model call, tied to the client's `progressToken`. Without a token the
+  SDK
+  only logs a warning.
+- **Logging**: `info("Enriching LAP-0004")`, shown in the client's own log view (the client sets the level with `logging/setLevel`).
+
+A client that does not offer sampling gets a readable error (`This client does not support sampling ... Use getProduct`), checked live
+with plain `curl`. A real sampling round trip needs a client with a model, so it is covered by `EnrichProductIT` (the SDK client plays the
+model) and was not run against Claude Code: whether Claude Code answers sampling requests is not verified here.
+
+### Tests (12.2)
+
+- `McpServerShowcaseIT` (10) and `ToolStyleIT` (10, the same tests on the `tool` style): four tools, only `sku` required, hints present
+  in one style and absent in the other, search / get / categories / error paths.
+- `McpResourcesIT` (6): list, template list, read both, case-insensitive SKU, unknown and demo SKU fail.
+- `EnrichProductIT` (3): sampling request content, progress and log notifications, no-sampling error, unknown SKU asks no model.
 
 ## Check the server without a client
 
