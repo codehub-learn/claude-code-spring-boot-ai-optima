@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xmlns="http://maven.apache.org/POM/4.0.0"
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<!-- Packaging -->
+	<modelVersion>4.0.0</modelVersion>
+
+	<!-- Versioning -->
+	<artifactId>spring-boot-core-demo</artifactId>
+	<parent>
+		<groupId>gr.codelearn</groupId>
+		<artifactId>spring-boot-ai</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+	</parent>
+
+	<!-- Meta-data -->
+	<name>[${project.artifactId}]</name>
+	<description>Spring Boot core demo module</description>
+
+	<!-- Dependencies -->
+	<dependencies>
+		<!-- Core Spring Boot starter: auto-configuration, logging, YAML support -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter</artifactId>
+		</dependency>
+
+		<!-- Testing: JUnit 5, AssertJ, Spring Boot test support -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<!-- Plugins -->
+		<plugins>
+			<!-- spring-boot-maven-plugin: `spring-boot:run` (dev) and `repackage` (executable layered jar) -->
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<!-- Compile-only processors: keep them out of the runtime classpath and the fat jar -->
+					<excludeGroupIds>
+						org.projectlombok,org.mapstruct
+					</excludeGroupIds>
+					<!-- Layered jar: splits deps / snapshot deps / app into layers that cache well in image builds -->
+					<layers>
+						<enabled>true</enabled>
+					</layers>
+					<mainClass>gr.codelearn.springbootai.coredemo.CoreDemoApplication</mainClass>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+</project>
