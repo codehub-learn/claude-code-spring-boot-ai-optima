@@ -7,8 +7,10 @@ import gr.codelearn.springbootai.persistencedemo.customer.CustomerService;
 import gr.codelearn.springbootai.persistencedemo.depot.DepotService;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.CourierDeliveryRank;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.CustomerRevenueSummary;
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.DepotLaneVolume;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.MonthlyRevenue;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentBookRequest;
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.ServiceLevelPerformance;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentDetailResponse;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentResponse;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.TrackingEventRequest;
@@ -35,6 +37,7 @@ import java.util.Map;
 class ShipmentService {
 
 	private final ShipmentRepository shipmentRepository;
+	private final ShipmentReportRepository shipmentReportRepository;
 	private final ShipmentMapper shipmentMapper;
 	private final CustomerService customerService;
 	private final DepotService depotService;
@@ -117,6 +120,14 @@ class ShipmentService {
 
 	List<CourierDeliveryRank> rankCouriersByDepot(final OffsetDateTime from, final OffsetDateTime to, final int topN) {
 		return shipmentRepository.rankCouriersByDepot(from, to, topN);
+	}
+
+	List<DepotLaneVolume> findBusiestLanes(final int limit) {
+		return shipmentReportRepository.findBusiestLanes(limit);
+	}
+
+	List<ServiceLevelPerformance> getServiceLevelPerformance(final OffsetDateTime from, final OffsetDateTime to) {
+		return shipmentReportRepository.findServiceLevelPerformance(from, to);
 	}
 
 	List<MonthlyRevenue> getMonthlyRevenue(final OffsetDateTime from, final OffsetDateTime to) {
