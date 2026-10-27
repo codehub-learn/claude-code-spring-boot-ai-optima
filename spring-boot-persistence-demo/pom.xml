@@ -67,6 +67,55 @@
 					<mainClass>gr.codelearn.springbootai.persistencedemo.PersistenceDemoApplication</mainClass>
 				</configuration>
 			</plugin>
+
+			<!-- flyway-maven-plugin: migrations are applied manually, never on app boot. Against the compose.yaml Oracle:
+			       ./mvnw -pl spring-boot-persistence-demo flyway:migrate@create-schema   once, as SYSTEM: creates the DROMEAS schema
+			       ./mvnw -pl spring-boot-persistence-demo flyway:migrate                 DDL + baseline seed + bulk data, as DROMEAS
+			       ./mvnw -pl spring-boot-persistence-demo flyway:info | flyway:validate
+			     The bulk data is repeatable scripts in db/migration (no separate db/demo location), so it is applied everywhere the
+			     schema is. The create-schema execution uses its own history table and the db/admin location. Versions track
+			     flyway-core via the Boot BOM property. -->
+			<plugin>
+				<groupId>org.flywaydb</groupId>
+				<artifactId>flyway-maven-plugin</artifactId>
+				<version>${flyway.version}</version>
+				<configuration>
+					<url>jdbc:oracle:thin:@//localhost:1521/FREEPDB1</url>
+					<user>dromeas</user>
+					<password>dromeas</password>
+					<locations>
+						<location>filesystem:${project.basedir}/src/main/resources/db/migration</location>
+					</locations>
+				</configuration>
+				<executions>
+					<execution>
+						<id>create-schema</id>
+						<configuration>
+							<user>system</user>
+							<password>oracle</password>
+							<table>flyway_schema_history_admin</table>
+							<!-- SYSTEM already holds Oracle's own objects, so Flyway needs an explicit baseline before V1 -->
+							<baselineOnMigrate>true</baselineOnMigrate>
+							<baselineVersion>0</baselineVersion>
+							<locations>
+								<location>filesystem:${project.basedir}/src/main/resources/db/admin</location>
+							</locations>
+						</configuration>
+					</execution>
+				</executions>
+				<dependencies>
+					<dependency>
+						<groupId>com.oracle.database.jdbc</groupId>
+						<artifactId>ojdbc17</artifactId>
+						<version>${oracle-database.version}</version>
+					</dependency>
+					<dependency>
+						<groupId>org.flywaydb</groupId>
+						<artifactId>flyway-database-oracle</artifactId>
+						<version>${flyway.version}</version>
+					</dependency>
+				</dependencies>
+			</plugin>
 		</plugins>
 	</build>
 </project>
