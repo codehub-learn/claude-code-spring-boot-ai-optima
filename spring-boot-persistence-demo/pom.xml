@@ -25,11 +25,10 @@
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
 
-		<!-- Lombok: compile-time only, for the JPA @Entity classes -->
+		<!-- Lombok: compile-time only -->
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
-			<optional>true</optional>
 		</dependency>
 
 		<!-- MapStruct: entity -> response record mappers. The processor itself is wired in the parent compiler plugin (annotationProcessorPaths:
@@ -44,17 +43,6 @@
 		<dependency>
 			<groupId>com.oracle.database.jdbc</groupId>
 			<artifactId>ojdbc17</artifactId>
-			<scope>runtime</scope>
-		</dependency>
-
-		<!-- Flyway: SQL-first migrations; flyway-database-oracle is the Oracle dialect module -->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-flyway</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.flywaydb</groupId>
-			<artifactId>flyway-database-oracle</artifactId>
 			<scope>runtime</scope>
 		</dependency>
 	</dependencies>
