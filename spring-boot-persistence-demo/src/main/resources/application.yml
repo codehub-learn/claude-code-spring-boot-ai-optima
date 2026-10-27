@@ -11,13 +11,29 @@ spring:
     url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
     username: dromeas
     password: dromeas
+    hikari:
+      pool-name: dromeas-pool
+      # Small pool: this is a demo, and virtual threads mean a blocked connection wait is cheap. Size a real
+      # pool to the DB's max_connections and the app's actual concurrency, not to request volume.
+      maximum-pool-size: 10
+      minimum-idle: 1
+      connection-timeout: 30000
+      max-lifetime: 1800000
+      auto-commit: false
+
+  jpa:
+    hibernate:
+      # validate: Hibernate checks the mapped entities against the schema Flyway built and fails fast on a
+      # mismatch. Never create/update/create-drop - migrations own the schema (CLAUDE.md).
+      ddl-auto: validate
+    # Close the persistence context at the end of the service call, not the view render. Lazy access from a
+    # controller or serializer then fails loudly instead of issuing surprise queries.
+    open-in-view: false
+    properties:
+      hibernate.format_sql: true
+    # Log SQL through the org.hibernate.SQL logger (see application-local.yml), not System.out.
+    show-sql: false
 
   # Migrations are applied manually, never on app boot.
   flyway:
     enabled: false
-
-  jpa:
-    hibernate:
-      # Migrations own the schema; Hibernate only validates it.
-      ddl-auto: validate
-    open-in-view: false
