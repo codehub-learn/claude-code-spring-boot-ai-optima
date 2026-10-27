@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: spring-boot-persistence-demo
+  threads:
+    virtual:
+      enabled: true
+
+  # Same local Oracle as compose.yaml; override with SPRING_DATASOURCE_* in other environments.
+  datasource:
+    url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
+    username: training
+    password: training
+
+  jpa:
+    hibernate:
+      # Migrations own the schema; Hibernate only validates it.
+      ddl-auto: validate
+    open-in-view: false
