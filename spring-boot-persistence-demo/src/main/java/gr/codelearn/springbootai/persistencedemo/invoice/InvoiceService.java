@@ -10,11 +10,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
- * Use cases for {@link Invoice}. Invoices are generated in bulk by the monthly billing run (a later step), so this service reads them
- * and records payment.
+ * Use cases for {@link Invoice}. Invoices are generated in bulk by the monthly billing run (a later step), so this service reads them and
+ * records payment.
  */
 @Service
 @RequiredArgsConstructor
@@ -26,6 +27,14 @@ class InvoiceService {
 
 	Page<InvoiceResponse> findByCustomer(final String customerCode, final Pageable pageable) {
 		return invoiceRepository.findByCustomerCustomerCode(customerCode, pageable).map(invoiceMapper::toResponse);
+	}
+
+	Page<InvoiceResponse> findPastDue(final LocalDate today, final Pageable pageable) {
+		return invoiceRepository.findPastDue(InvoiceStatus.ISSUED, today, pageable).map(invoiceMapper::toResponse);
+	}
+
+	BigDecimal getOutstandingBalance(final String customerCode) {
+		return invoiceRepository.sumOutstandingByCustomerCode(customerCode, InvoiceStatus.PAID);
 	}
 
 	InvoiceResponse getByNumber(final String invoiceNumber) {

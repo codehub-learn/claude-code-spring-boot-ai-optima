@@ -16,6 +16,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Use cases for {@link Shipment}, the aggregate root of its {@link TrackingEvent}s: booking, lookup with the scan history, and recording
  * scans. Customer and depots are resolved through their own services.
@@ -38,6 +44,27 @@ class ShipmentService {
 		return shipmentRepository.findByStatus(status, pageable).map(shipmentMapper::toResponse);
 	}
 
+	Page<ShipmentResponse> findOverdue(final Pageable pageable) {
+		return shipmentRepository.findOverdue(OffsetDateTime.now(), pageable).map(shipmentMapper::toResponse);
+	}
+
+	List<ShipmentResponse> findDeliveredBetween(final String customerCode, final OffsetDateTime from, final OffsetDateTime to) {
+		return shipmentRepository.findDeliveredBetween(customerCode, ShipmentStatus.DELIVERED, from, to).stream()
+								 .map(shipmentMapper::toResponse).toList();
+	}
+
+	Map<ShipmentStatus, Long> countByStatusForDestinationDepot(final String depotCode) {
+		final Map<ShipmentStatus, Long> counts = new EnumMap<>(ShipmentStatus.class);
+		for (final Object[] row : shipmentRepository.countByStatusForDestinationDepot(depotCode)) {
+			counts.put((ShipmentStatus) row[0], (Long) row[1]);
+		}
+		return counts;
+	}
+
+	BigDecimal getDeliveredRevenue(final String customerCode, final OffsetDateTime from, final OffsetDateTime to) {
+		return shipmentRepository.sumPriceDelivered(customerCode, ShipmentStatus.DELIVERED, from, to);
+	}
+
 	ShipmentDetailResponse getByTrackingNumber(final String trackingNumber) {
 		return shipmentMapper.toDetailResponse(requireWithEvents(trackingNumber));
 	}
@@ -48,11 +75,12 @@ class ShipmentService {
 			throw new ConflictException("Shipment '%s' already exists".formatted(request.trackingNumber()));
 		}
 		final Shipment shipment = new Shipment(request.trackingNumber(), customerService.requireByCode(request.customerCode()),
-				depotService.requireByCode(request.originDepotCode()),
-				depotService.requireByCode(request.destinationDepotCode()), request.serviceLevel(),
-				request.weightKg(), request.price(), request.recipientName(),
-				new Address(request.recipientLine1(), request.recipientCity(), request.recipientPostalCode()),
-				request.promisedBy());
+											   depotService.requireByCode(request.originDepotCode()),
+											   depotService.requireByCode(request.destinationDepotCode()), request.serviceLevel(),
+											   request.weightKg(), request.price(), request.recipientName(),
+											   new Address(request.recipientLine1(), request.recipientCity(),
+		                                                   request.recipientPostalCode()),
+											   request.promisedBy());
 		return shipmentMapper.toDetailResponse(shipmentRepository.save(shipment));
 	}
 
@@ -77,6 +105,6 @@ class ShipmentService {
 
 	private Shipment requireWithEvents(final String trackingNumber) {
 		return shipmentRepository.findWithEventsByTrackingNumber(trackingNumber)
-				.orElseThrow(() -> new NotFoundException("Shipment", trackingNumber));
+								 .orElseThrow(() -> new NotFoundException("Shipment", trackingNumber));
 	}
 }

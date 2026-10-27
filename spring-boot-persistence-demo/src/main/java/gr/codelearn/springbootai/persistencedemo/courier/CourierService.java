@@ -13,6 +13,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Use cases for {@link Courier}. The depot is resolved through {@link DepotService}, never through its repository.
  */
@@ -29,6 +33,18 @@ class CourierService {
 		return courierRepository.findByDepotCode(depotCode, pageable).map(courierMapper::toResponse);
 	}
 
+	List<CourierResponse> findAvailableForDispatch(final String depotCode, final int minCapacity) {
+		return courierRepository.findActiveWithCapacity(depotCode, minCapacity).stream().map(courierMapper::toResponse).toList();
+	}
+
+	Map<VehicleType, Long> countActiveByVehicleType() {
+		final Map<VehicleType, Long> counts = new EnumMap<>(VehicleType.class);
+		for (final Object[] row : courierRepository.countActiveByVehicleType()) {
+			counts.put((VehicleType) row[0], (Long) row[1]);
+		}
+		return counts;
+	}
+
 	CourierResponse getByEmployeeCode(final String employeeCode) {
 		return courierMapper.toResponse(requireByEmployeeCode(employeeCode));
 	}
@@ -39,8 +55,8 @@ class CourierService {
 			throw new ConflictException("Courier '%s' already exists".formatted(request.employeeCode()));
 		}
 		final Courier courier = new Courier(depotService.requireByCode(request.depotCode()), request.employeeCode(), request.firstName(),
-				request.lastName(), request.phone(), request.vehicleType(), request.dailyCapacity(),
-				request.hiredOn());
+											request.lastName(), request.phone(), request.vehicleType(), request.dailyCapacity(),
+											request.hiredOn());
 		return courierMapper.toResponse(courierRepository.save(courier));
 	}
 

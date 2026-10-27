@@ -17,8 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Use cases for {@link Customer}. Private and business customers are created through separate methods, which build them with the
- * {@link Customer} factories so the identity columns always match the customer type. {@link #requireByCode} is the entity-returning
- * method the other features use to wire their associations.
+ * {@link Customer} factories so the identity columns always match the customer type. {@link #requireByCode} is the entity-returning method
+ * the other features use to wire their associations.
  */
 @Service
 @RequiredArgsConstructor
@@ -33,6 +33,15 @@ public class CustomerService {
 		return customerRepository.findByCustomerType(customerType, pageable).map(customerMapper::toResponse);
 	}
 
+	Page<CustomerResponse> search(final String term, final Pageable pageable) {
+		return customerRepository.search(term, pageable).map(customerMapper::toResponse);
+	}
+
+	Page<CustomerResponse> findByTypeTierAndDepot(final CustomerType type, final ContractTier tier, final String depotCode,
+												  final Pageable pageable) {
+		return customerRepository.findByTypeTierAndDepot(type, tier, depotCode, pageable).map(customerMapper::toResponse);
+	}
+
 	CustomerResponse getByCode(final String customerCode) {
 		return customerMapper.toResponse(requireByCode(customerCode));
 	}
@@ -41,8 +50,9 @@ public class CustomerService {
 	CustomerResponse createPrivate(final PrivateCustomerRequest request) {
 		assertAvailable(request.customerCode(), request.email());
 		final Customer customer = Customer.privateCustomer(request.customerCode(), request.firstName(), request.lastName(),
-				request.email(), request.phone(), depotService.requireByCode(request.depotCode()),
-				new Address(request.line1(), request.city(), request.postalCode()));
+														   request.email(), request.phone(),
+		                                                   depotService.requireByCode(request.depotCode()),
+														   new Address(request.line1(), request.city(), request.postalCode()));
 		return customerMapper.toResponse(customerRepository.save(customer));
 	}
 
@@ -50,8 +60,8 @@ public class CustomerService {
 	CustomerResponse createBusiness(final BusinessCustomerRequest request) {
 		assertAvailable(request.customerCode(), request.email());
 		final Customer customer = Customer.business(request.customerCode(), request.companyName(), request.vatNumber(), request.email(),
-				request.phone(), depotService.requireByCode(request.depotCode()),
-				new Address(request.line1(), request.city(), request.postalCode()));
+													request.phone(), depotService.requireByCode(request.depotCode()),
+													new Address(request.line1(), request.city(), request.postalCode()));
 		return customerMapper.toResponse(customerRepository.save(customer));
 	}
 
