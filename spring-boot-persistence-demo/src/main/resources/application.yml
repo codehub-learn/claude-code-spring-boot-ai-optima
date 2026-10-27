@@ -5,11 +5,16 @@ spring:
     virtual:
       enabled: true
 
-  # Same local Oracle as compose.yaml; override with SPRING_DATASOURCE_* in other environments.
+  # The DROMEAS schema in the compose.yaml Oracle (FREEPDB1). Create it and apply the migrations by hand (see the
+  # flyway-maven-plugin comment in pom.xml); override with SPRING_DATASOURCE_* in other environments.
   datasource:
     url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
-    username: training
-    password: training
+    username: dromeas
+    password: dromeas
+
+  # Migrations are applied manually, never on app boot.
+  flyway:
+    enabled: false
 
   jpa:
     hibernate:
