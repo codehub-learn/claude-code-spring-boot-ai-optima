@@ -5,6 +5,7 @@ import gr.codelearn.springbootai.persistencedemo.common.ConflictException;
 import gr.codelearn.springbootai.persistencedemo.common.NotFoundException;
 import gr.codelearn.springbootai.persistencedemo.customer.CustomerService;
 import gr.codelearn.springbootai.persistencedemo.depot.DepotService;
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.CustomerRevenueSummary;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentBookRequest;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentDetailResponse;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentResponse;
@@ -61,6 +62,10 @@ class ShipmentService {
 		return counts;
 	}
 
+	List<CustomerRevenueSummary> findTopCustomersByRevenue(final OffsetDateTime from, final OffsetDateTime to, final Pageable pageable) {
+		return shipmentRepository.findTopCustomersByRevenue(ShipmentStatus.DELIVERED, from, to, pageable);
+	}
+
 	BigDecimal getDeliveredRevenue(final String customerCode, final OffsetDateTime from, final OffsetDateTime to) {
 		return shipmentRepository.sumPriceDelivered(customerCode, ShipmentStatus.DELIVERED, from, to);
 	}
@@ -79,7 +84,7 @@ class ShipmentService {
 											   depotService.requireByCode(request.destinationDepotCode()), request.serviceLevel(),
 											   request.weightKg(), request.price(), request.recipientName(),
 											   new Address(request.recipientLine1(), request.recipientCity(),
-		                                                   request.recipientPostalCode()),
+														   request.recipientPostalCode()),
 											   request.promisedBy());
 		return shipmentMapper.toDetailResponse(shipmentRepository.save(shipment));
 	}

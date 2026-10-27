@@ -3,6 +3,7 @@ package gr.codelearn.springbootai.persistencedemo.invoice;
 import gr.codelearn.springbootai.persistencedemo.common.ConflictException;
 import gr.codelearn.springbootai.persistencedemo.common.NotFoundException;
 import gr.codelearn.springbootai.persistencedemo.invoice.dto.InvoiceResponse;
+import gr.codelearn.springbootai.persistencedemo.invoice.dto.InvoiceSummary;
 import gr.codelearn.springbootai.persistencedemo.invoice.mapper.InvoiceMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -31,6 +32,10 @@ class InvoiceService {
 
 	Page<InvoiceResponse> findPastDue(final LocalDate today, final Pageable pageable) {
 		return invoiceRepository.findPastDue(InvoiceStatus.ISSUED, today, pageable).map(invoiceMapper::toResponse);
+	}
+
+	Page<InvoiceSummary> findSummariesByStatus(final InvoiceStatus status, final Pageable pageable) {
+		return invoiceRepository.findSummariesByStatus(status, pageable);
 	}
 
 	BigDecimal getOutstandingBalance(final String customerCode) {

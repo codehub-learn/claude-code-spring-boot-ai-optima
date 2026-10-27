@@ -1,7 +1,9 @@
 package gr.codelearn.springbootai.persistencedemo.shipment;
 
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.CustomerRevenueSummary;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -53,4 +55,16 @@ interface ShipmentRepository extends JpaRepository<Shipment, Long> {
 		   where s.customer.customerCode = :customerCode and s.status = :status and s.deliveredAt >= :from and s.deliveredAt < :to""")
 	BigDecimal sumPriceDelivered(@Param("customerCode") String customerCode, @Param("status") ShipmentStatus status,
 								 @Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to);
+
+	/**
+	 * Top customers by delivered revenue in the period, mapped to a record with a JPQL constructor expression (class-based projection).
+	 */
+	@Query("""
+		   select new gr.codelearn.springbootai.persistencedemo.shipment.dto.CustomerRevenueSummary(c.customerCode, count(s), sum(s.price))
+		   from Shipment s join s.customer c
+		   where s.status = :status and s.deliveredAt >= :from and s.deliveredAt < :to
+		   group by c.customerCode
+		   order by sum(s.price) desc""")
+	List<CustomerRevenueSummary> findTopCustomersByRevenue(@Param("status") ShipmentStatus status, @Param("from") OffsetDateTime from,
+														   @Param("to") OffsetDateTime to, Pageable pageable);
 }

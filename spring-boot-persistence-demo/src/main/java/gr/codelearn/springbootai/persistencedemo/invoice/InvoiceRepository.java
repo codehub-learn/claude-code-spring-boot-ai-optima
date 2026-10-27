@@ -1,5 +1,6 @@
 package gr.codelearn.springbootai.persistencedemo.invoice;
 
+import gr.codelearn.springbootai.persistencedemo.invoice.dto.InvoiceSummary;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -26,4 +27,15 @@ interface InvoiceRepository extends JpaRepository<Invoice, Long> {
 
 	@Query("select coalesce(sum(i.totalAmount), 0) from Invoice i where i.customer.customerCode = :customerCode and i.status <> :paid")
 	BigDecimal sumOutstandingByCustomerCode(@Param("customerCode") String customerCode, @Param("paid") InvoiceStatus paid);
+
+	/**
+	 * Invoices of a status as a lightweight view (interface-based projection): only the aliased columns are selected, no entity is loaded.
+	 */
+	@Query(value = """
+				   select i.invoiceNumber as invoiceNumber, c.customerCode as customerCode, i.dueOn as dueOn, i.totalAmount as totalAmount
+				   from Invoice i join i.customer c
+				   where i.status = :status
+				   order by i.dueOn""",
+		   countQuery = "select count(i) from Invoice i where i.status = :status")
+	Page<InvoiceSummary> findSummariesByStatus(@Param("status") InvoiceStatus status, Pageable pageable);
 }
