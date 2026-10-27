@@ -5,7 +5,9 @@ import gr.codelearn.springbootai.persistencedemo.common.ConflictException;
 import gr.codelearn.springbootai.persistencedemo.common.NotFoundException;
 import gr.codelearn.springbootai.persistencedemo.customer.CustomerService;
 import gr.codelearn.springbootai.persistencedemo.depot.DepotService;
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.CourierDeliveryRank;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.CustomerRevenueSummary;
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.MonthlyRevenue;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentBookRequest;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentDetailResponse;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.ShipmentResponse;
@@ -111,5 +113,13 @@ class ShipmentService {
 	private Shipment requireWithEvents(final String trackingNumber) {
 		return shipmentRepository.findWithEventsByTrackingNumber(trackingNumber)
 								 .orElseThrow(() -> new NotFoundException("Shipment", trackingNumber));
+	}
+
+	List<CourierDeliveryRank> rankCouriersByDepot(final OffsetDateTime from, final OffsetDateTime to, final int topN) {
+		return shipmentRepository.rankCouriersByDepot(from, to, topN);
+	}
+
+	List<MonthlyRevenue> getMonthlyRevenue(final OffsetDateTime from, final OffsetDateTime to) {
+		return shipmentRepository.monthlyRevenue(from, to);
 	}
 }

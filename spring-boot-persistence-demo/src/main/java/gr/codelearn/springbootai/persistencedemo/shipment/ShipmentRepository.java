@@ -1,9 +1,10 @@
 package gr.codelearn.springbootai.persistencedemo.shipment;
 
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.CourierDeliveryRank;
 import gr.codelearn.springbootai.persistencedemo.shipment.dto.CustomerRevenueSummary;
+import gr.codelearn.springbootai.persistencedemo.shipment.dto.MonthlyRevenue;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -67,4 +68,35 @@ interface ShipmentRepository extends JpaRepository<Shipment, Long> {
 		   order by sum(s.price) desc""")
 	List<CustomerRevenueSummary> findTopCustomersByRevenue(@Param("status") ShipmentStatus status, @Param("from") OffsetDateTime from,
 														   @Param("to") OffsetDateTime to, Pageable pageable);
+
+	/**
+	 * Native Oracle: ranks couriers by delivered shipments within their depot with the {@code rank()} window function, keeping the top
+	 * {@code topN} per depot. Aliases are quoted so Oracle keeps their case for the interface projection.
+	 */
+	@Query(value = """
+				   select * from (
+				       select d.code as "depotCode", c.employee_code as "employeeCode", c.last_name as "lastName", count(*) as "delivered",
+				              rank() over (partition by d.id order by count(*) desc) as "depotRank"
+				       from shipment s
+				       join courier c on c.id = s.courier_id
+				       join depot d on d.id = c.depot_id
+				       where s.status = 'DELIVERED' and s.delivered_at >= :from and s.delivered_at < :to
+				       group by d.id, d.code, c.id, c.employee_code, c.last_name
+				   )
+				   where "depotRank" <= :topN
+				   order by "depotCode", "depotRank", "employeeCode"
+				   """, nativeQuery = true)
+	List<CourierDeliveryRank> rankCouriersByDepot(@Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to,
+												  @Param("topN") int topN);
+
+	/**
+	 * Native Oracle: delivered shipments and revenue per calendar month, bucketed with {@code to_char(..., 'YYYY-MM')}.
+	 */
+	@Query(value = """
+				   select to_char(s.delivered_at, 'YYYY-MM') as "month", count(*) as "shipments", sum(s.price) as "revenue"
+				   from shipment s
+				   where s.status = 'DELIVERED' and s.delivered_at >= :from and s.delivered_at < :to
+				   group by to_char(s.delivered_at, 'YYYY-MM')
+				   order by 1""", nativeQuery = true)
+	List<MonthlyRevenue> monthlyRevenue(@Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to);
 }
